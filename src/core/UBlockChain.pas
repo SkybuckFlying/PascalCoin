@@ -645,7 +645,7 @@ begin
     inc(FIntTotalDeleted,list.Count);
   finally
     list.Clear;
-  UnlockPCOperationsStorage;
+    UnlockPCOperationsStorage;
   end;
   FreeAndNil(FPCOperationsStorageList);
   inherited Destroy;
@@ -686,7 +686,7 @@ begin
       P^.locksCount:=0;
       P^.ptrPCOperation := APCOperation;
       list.Insert(iPos,P);
-   inc(FIntTotalNewOps);
+      inc(FIntTotalNewOps);
     end;
     inc(P^.locksCount);
     inc(FIntTotalAdded);
@@ -838,7 +838,7 @@ begin
     Finally
       if Not Result then begin
         NewLog(Operations, lterror, 'Invalid new block '+inttostr(Operations.OperationBlock.block)+': ' + errors+ ' > '+TPCOperationsComp.OperationBlockToText(Operations.OperationBlock));
-    end;
+      end;
       Operations.Unlock;
     End;
   Finally
