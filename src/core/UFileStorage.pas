@@ -101,14 +101,15 @@ Uses ULog, SysUtils, UBaseTypes,
   UConst;
 { TFileStorage }
 
+const
+  CT_GroupBlockSize = 1000;  // constant used to allocate an array on the stack !
+  CT_SizeOfBlockHeader = 16;  // constant used to allocate an array on the stack !
+
 var
   CT_TBlockHeader_NUL : TBlockHeader; // initialized in initialization section
 
+  CT_Safebox_Extension : string; // initialized in initialization section
 
-  CT_Safebox_Extension = {$IFDEF USE_ABSTRACTMEM}'.am_safebox'{$ELSE}'.safebox'{$ENDIF};
-
-  CT_GroupBlockSize = 1000;
-  CT_SizeOfBlockHeader = 16;
   {
   BlockChain file storage:
 
@@ -1113,7 +1114,7 @@ begin
         // Search on previous header...
         If (iBlockHeaders>0) then begin
           dec(_iBlockHeaders);
-          dec(_BlockHeaderFirstBlock,CT_GroupBlockSize);
+          dec(_BlockHeaderFirstBlock,CT_GroupBlockSize); // Skybuck: possible 32 bit limitation might cause wrap around issues leading to file corruption !
         end else begin
           break;
         end;
@@ -1159,5 +1160,6 @@ end;
 initialization
   Initialize(CT_TBlockHeader_NUL);
 
+  CT_Safebox_Extension := {$IFDEF USE_ABSTRACTMEM}'.am_safebox'{$ELSE}'.safebox'{$ENDIF};
 
 end.

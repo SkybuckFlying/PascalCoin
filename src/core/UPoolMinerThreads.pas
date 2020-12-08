@@ -166,7 +166,7 @@ Type
     FChangeTimestampAndNOnceBytePos : Integer;
     FDigestStreamMsg : TMemoryStream;
     FMinNOnce,FMaxNOnce : Cardinal;
-    FResetNOnce : Boolean;						  
+    FResetNOnce : Boolean;
     procedure BCExecute; override;
   public
     Constructor Create(CPUDeviceThread : TCPUDeviceThread);

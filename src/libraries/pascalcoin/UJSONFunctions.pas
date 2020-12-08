@@ -34,7 +34,7 @@ Uses
   System.JSON,
   {$ENDIF}
   DBXJSON,
-  JSON,
+//  JSON,
   {$ENDIF}
   SysUtils, DateUtils, Variants, Classes, ULog,
   {$IFNDEF FPC}System.Generics.Collections{$ELSE}Generics.Collections{$ENDIF};

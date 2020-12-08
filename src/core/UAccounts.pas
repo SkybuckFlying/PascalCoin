@@ -2312,7 +2312,6 @@ begin
     BufferBlocksHash.Add(Result.block_hash[Low(Result.block_hash)],Length(Result.block_hash));
     {$ENDIF}
   end;
-  FBufferBlocksHash := FBufferBlocksHash+Result.block_hash;
   FTotalBalance := FTotalBalance + (blockChain.reward + blockChain.fee);
   FTotalFee := FTotalFee - blockChain.fee;
   If (length(accs_miner)>0) then begin
@@ -3533,7 +3532,7 @@ begin
               Exit;
             end;
           end;
-          FTotalBalance := FTotalBalance + block.accounts[iacc].balance;
+          FTotalBalance := FTotalBalance + LBlock.accounts[iacc].balance;
         end;
         errors := 'Corrupted stream reading block '+inttostr(iblock+1)+'/'+inttostr(sbHeader.blockscount);
         If TStreamOp.ReadAnsiString(Stream,LBlock.block_hash)<0 then exit;
@@ -5002,8 +5001,8 @@ begin
   LPAccountToBuy^.accountInfo.state := as_Normal;
   LPAccountToBuy^.accountInfo.accountKey := ANewAccountKey;
 
-  FTotalBalance := FTotalBalance - fee;
-  FTotalFee := FTotalFee + fee;
+  FTotalBalance := FTotalBalance - AFee;
+  FTotalFee := FTotalFee + AFee;
   Result := true;
 end;
 
@@ -5385,7 +5384,7 @@ begin
       Exit;
     end;
     nTotalAmountReceived := nTotalAmountReceived + receivers_amounts[i];
-    PaccTarget := GetInternalAccount(receivers[i]);
+    PaccTarget := GetInternalAccount(receivers[i],PaccTarget_Sealed);
     if ((PaccTarget^.balance + receivers_amounts[i])>CT_MaxWalletAmount) then begin
       errors := 'Max receiver balance';
       Exit;

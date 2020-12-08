@@ -366,7 +366,6 @@ Type
     Property OnChanged : TNotifyEvent read FOnChanged write FOnChanged;
     Property Max0feeOperationsBySigner : Integer Read FMax0feeOperationsBySigner write SetMax0feeOperationsBySigner;
     procedure MarkVerifiedECDSASignatures(operationsHashTreeToMark : TOperationsHashTree);
-
     // Will add all operations of the HashTree to then end of AList without removing previous objects
     function GetOperationsList(AList : TList<TPCOperation>; AAddOnlyOperationsWithoutNotVerifiedSignature : Boolean) : Integer;
   End;
@@ -573,23 +572,12 @@ Type
   End;
 
 var
+  CT_TOperationPayload_NUL : TOperationPayload = (payload_type:0;payload_raw:Nil);
   CT_TOperationResume_NUL : TOperationResume; // initialized in initialization section
   CT_TMultiOpSender_NUL : TMultiOpSender;
   CT_TMultiOpReceiver_NUL : TMultiOpReceiver;
   CT_TMultiOpChangeInfo_NUL : TMultiOpChangeInfo;
-  CT_TOpChangeAccountInfoType_Txt : Array[Low(TOpChangeAccountInfoType)..High(TOpChangeAccountInfoType)] of AnsiString = ('public_key','account_name','account_type','list_for_public_sale','list_for_private_sale','delist');
-// Skybuck: OperationPayload is new, fix me !
-(*Const
-  CT_TOperationPayload_NUL : TOperationPayload = (payload_type:0;payload_raw:Nil);
-  CT_TOperationResume_NUL : TOperationResume = (valid:false;Block:0;NOpInsideBlock:-1;OpType:0;OpSubtype:0;time:0;AffectedAccount:0;SignerAccount:-1;n_operation:0;DestAccount:-1;SellerAccount:-1;newKey:(EC_OpenSSL_NID:0;x:Nil;y:Nil);OperationTxt:'';Amount:0;Fee:0;Balance:0;OriginalPayload:(payload_type:0;payload_raw:nil);PrintablePayload:'';OperationHash:Nil;OperationHash_OLD:Nil;errors:'';isMultiOperation:False;Senders:Nil;Receivers:Nil;changers:Nil);
-  CT_TMultiOpSender_NUL : TMultiOpSender =  (Account:0;Amount:0;N_Operation:0;Payload:(payload_type:0;payload_raw:Nil);Signature:(r:Nil;s:Nil));
-  CT_TMultiOpReceiver_NUL : TMultiOpReceiver = (Account:0;Amount:0;Payload:(payload_type:0;payload_raw:Nil));
-  CT_TMultiOpChangeInfo_NUL : TMultiOpChangeInfo = (Account:0;N_Operation:0;Changes_type:[];New_Accountkey:(EC_OpenSSL_NID:0;x:Nil;y:Nil);New_Name:Nil;New_Type:0;New_Data:Nil;Seller_Account:-1;Account_Price:-1;Locked_Until_Block:0;
-    Hashed_secret:Nil;
-    Fee:0;Signature:(r:Nil;s:Nil));
-  CT_TOpChangeAccountInfoType_Txt : Array[Low(TOpChangeAccountInfoType)..High(TOpChangeAccountInfoType)] of String = ('public_key','account_name','account_type','list_for_public_sale','list_for_private_sale', 'delist', 'account_data','list_for_account_swap','list_for_coin_swap');
-*)
-
+  CT_TOpChangeAccountInfoType_Txt : Array[Low(TOpChangeAccountInfoType)..High(TOpChangeAccountInfoType)] of AnsiString;
 
 implementation
 
@@ -657,7 +645,7 @@ begin
     inc(FIntTotalDeleted,list.Count);
   finally
     list.Clear;
-    UnlockPCOperationsStorage;
+  UnlockPCOperationsStorage;
   end;
   FreeAndNil(FPCOperationsStorageList);
   inherited Destroy;
@@ -698,7 +686,7 @@ begin
       P^.locksCount:=0;
       P^.ptrPCOperation := APCOperation;
       list.Insert(iPos,P);
-      inc(FIntTotalNewOps);
+   inc(FIntTotalNewOps);
     end;
     inc(P^.locksCount);
     inc(FIntTotalAdded);
@@ -850,7 +838,7 @@ begin
     Finally
       if Not Result then begin
         NewLog(Operations, lterror, 'Invalid new block '+inttostr(Operations.OperationBlock.block)+': ' + errors+ ' > '+TPCOperationsComp.OperationBlockToText(Operations.OperationBlock));
-      end;
+    end;
       Operations.Unlock;
     End;
   Finally
@@ -1891,7 +1879,7 @@ begin
             if (op.DoOperation(FPreviousUpdatedBlocks, SafeBoxTransaction,errors)) then begin
               if aux.AddOperationToHashTree(op) then begin
                 inc(n);
-		        FOperationBlock.fee := FOperationBlock.fee + op.OperationFee;
+                FOperationBlock.fee := FOperationBlock.fee + op.OperationFee;
                 {$IFDEF HIGHLOG}TLog.NewLog(ltdebug,Classname,'Sanitizing (pos:'+inttostr(i+1)+'/'+inttostr(lastn)+'): '+op.ToString){$ENDIF};
               end else begin
                 TLog.NewLog(lterror,ClassName,Format('Undo operation.DoExecute at Sanitize due limits reached. Executing %d operations',[aux.OperationsCount]));
@@ -3821,6 +3809,7 @@ end;
 
 initialization
 
+  Initialize(CT_TOperationPayload_NUL);
   Initialize(CT_TOperationResume_NUL);
   with CT_TOperationResume_NUL do
   begin
@@ -3839,6 +3828,26 @@ initialization
     Seller_Account:=-1;
     Account_Price:=-1;
   end;
+
+  // Skybuck: I recommend adding some prefix to these enumerations otherwise it might conflict
+  // some day with other variables in code.
+  // for example taking the first letter of every word in this type which would be:
+  // oc for operation change
+  // ait for account info type
+  // oc_ait
+  // initializating strings like this is also a little bit safer incase there is any disruption
+  // in the enumeration
+  // there is some risks of new entries having no corresponding string set
+  // this is a question of debugging and then setting the string.
+  CT_TOpChangeAccountInfoType_Txt[public_key] := 'public_key';
+  CT_TOpChangeAccountInfoType_Txt[account_name] := 'account_name';
+  CT_TOpChangeAccountInfoType_Txt[account_type] := 'account_type';
+  CT_TOpChangeAccountInfoType_Txt[list_for_public_sale] := 'list_for_public_sale';
+  CT_TOpChangeAccountInfoType_Txt[list_for_private_sale] := 'list_for_private_sale';
+  CT_TOpChangeAccountInfoType_Txt[delist] := 'delist';
+  CT_TOpChangeAccountInfoType_Txt[account_data] := 'account_data';
+  CT_TOpChangeAccountInfoType_Txt[list_for_account_swap] := 'list_for_account_swap';
+  CT_TOpChangeAccountInfoType_Txt[list_for_coin_swap] := 'list_for_coin_swap';
 
   SetLength(_OperationsClass, 0);
   RegisterOperationsClass;

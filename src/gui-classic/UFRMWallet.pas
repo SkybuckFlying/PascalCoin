@@ -920,7 +920,7 @@ Var account : TAccount;
 begin
   if AccountNumber<0 then exit;
   account := FNode.GetMempoolAccount(AccountNumber);
-  if Length(account.name)>0 then s:='Name: '+TEncoding.ANSI.GetString(account.name)
+  if Length(account.name)>0 then s:='Name: '+TEncoding.ANSI.GetString(account.name) // skybuck: crash ? access violation ? perhaps ansi string related ? or abstract mempool still has errors
   else s:='';
   Strings.Add(Format('Account: %s %s Type:%d',[TAccountComp.AccountNumberToAccountTxtNumber(AccountNumber),s,account.account_type]));
   Strings.Add('');

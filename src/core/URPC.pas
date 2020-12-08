@@ -150,7 +150,6 @@ Type
     class function FindRegisteredProcessMethod(Const AMethodName : String) : TRPCProcessMethod;
   end;
 
-
 implementation
 
 Uses  {$IFNDEF FPC}windows,{$ENDIF}
@@ -2776,7 +2775,9 @@ Var c,c2,c3 : Cardinal;
   opr : TOperationResume;
   r1,r2 : TRawBytes;
   ocl : TOrderedCardinalList;
-  Lanl : TAccountsNumbersList;
+  // renaming this to captital letter L to avoid confusion
+  // Lanl : TAccountsNumbersList; // Skybuck: this is LanL not Lan1 (font: courier new size 9 issue)
+  LanL : TAccountsNumbersList;
   jsonarr : TPCJSONArray;
   jso : TPCJSONObject;
   LRPCProcessMethod : TRPCProcessMethod;
@@ -2831,12 +2832,16 @@ begin
         ErrorDesc := 'Public key not found in wallet';
         exit;
       end;
-      Lanl := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
+      LanL := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
       k := params.AsInteger('max',100);
       l := params.AsInteger('start',0);
-      for j := 0 to Lanl.Count - 1 do begin
+
+      // Skybuck: Warning numerical one and letter L look the same with low letter L
+      // in font: courier new size: 9
+      // example: one 111111 vs small L llllll
+      for j := 0 to LanL.Count - 1 do begin
         if (j>=l) then begin
-          account := FNode.GetMempoolAccount(Lanl.Get(j));
+          account := FNode.GetMempoolAccount(LanL.Get(j));
           TPascalCoinJSONComp.FillAccountObject(account,jsonarr.GetAsObject(jsonarr.Count));
         end;
         if (k>0) And ((j+1)>=(k+l)) then break;
@@ -2847,10 +2852,10 @@ begin
       l := params.AsInteger('start',0);
       c := 0;
       for i:=0 to _RPCServer.WalletKeys.AccountsKeyList.Count-1 do begin
-        Lanl := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
-        for j := 0 to Lanl.Count - 1 do begin
+        LanL := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
+        for j := 0 to LanL.Count - 1 do begin
           if (c>=l) then begin
-            account := FNode.GetMempoolAccount(Lanl.Get(j));
+            account := FNode.GetMempoolAccount(LanL.Get(j));
             TPascalCoinJSONComp.FillAccountObject(account,jsonarr.GetAsObject(jsonarr.Count));
           end;
           inc(c);
@@ -2879,15 +2884,15 @@ begin
         ErrorDesc := 'Public key not found in wallet';
         exit;
       end;
-      Lanl := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
-      jsonresponse.GetAsVariant('result').value := Lanl.count;
+      LanL := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
+      jsonresponse.GetAsVariant('result').value := LanL.count;
       Result := true;
     end else begin
       ErrorDesc := '';
       c :=0;
       for i:=0 to _RPCServer.WalletKeys.AccountsKeyList.Count-1 do begin
-        Lanl := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
-        inc(c,Lanl.count);
+        LanL := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
+        inc(c,LanL.count);
       end;
       jsonresponse.GetAsVariant('result').value := c;
       Result := true;
@@ -2909,12 +2914,11 @@ begin
         ErrorDesc := 'Public key not found in wallet';
         exit;
       end;
-      Lanl := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
+      LanL := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
       account.balance := 0;
-
       // Skybuck: PascalCoin may have an undetected bug related to inc not working correctly for int64 type ! I recommend not using inc at all to prevent these hard to find bugs !
-      for j := 0 to Lan1.Count - 1 do begin
-        account.balance := account.balance + FNode.GetMempoolAccount(Lanl.Get(j)).balance );
+      for j := 0 to LanL.Count - 1 do begin
+        account.balance := account.balance + FNode.GetMempoolAccount(LanL.Get(j)).balance;
       end;
       jsonresponse.GetAsVariant('result').value := ToJSONCurrency(account.balance);
       Result := true;
@@ -2924,9 +2928,9 @@ begin
       account.balance := 0;
       for i:=0 to _RPCServer.WalletKeys.AccountsKeyList.Count-1 do begin
         // Skybuck: PascalCoin might have an inc int64 bug in this code:
-        Lanl := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
-        for j := 0 to Lanl.Count - 1 do begin
-          account.balance := account.balance + FNode.GetMempoolAccount(Lanl.Get(j)).balance;
+        LanL := _RPCServer.WalletKeys.AccountsKeyList.AccountKeyList[i];
+        for j := 0 to LanL.Count - 1 do begin
+          account.balance := account.balance + FNode.GetMempoolAccount(LanL.Get(j)).balance;
         end;
       end;
       jsonresponse.GetAsVariant('result').value := ToJSONCurrency(account.balance);

@@ -214,6 +214,8 @@ begin
     HexFormatted: Result := $00100000;
     Base58Formatted: Result := $01000000;
     AddressedByName: Result := $10000000;
+  else // Skybuck: default added
+    Result := $00000000;
   end;
 end;
 
