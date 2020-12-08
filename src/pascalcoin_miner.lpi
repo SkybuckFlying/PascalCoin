@@ -9,8 +9,7 @@
         <MainUnitHasTitleStatement Value="False"/>
       </Flags>
       <SessionStorage Value="InProjectDir"/>
-      <MainUnit Value="0"/>
-      <Title Value="PascalCoinMiner"/>
+      <MainUnit Value="0"/>      
       <UseAppBundle Value="False"/>
       <ResourceType Value="res"/>
     </General>
@@ -37,8 +36,7 @@
     <Units Count="1">
       <Unit0>
         <Filename Value="pascalcoin_miner.pp"/>
-        <IsPartOfProject Value="True"/>
-        <UnitName Value="PascalCoinMiner"/>
+        <IsPartOfProject Value="True"/>        
       </Unit0>
     </Units>
   </ProjectOptions>
@@ -50,7 +48,7 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="core;libraries\pasopencl;libraries\synapse;libraries\pascalcoin"/>
+      <OtherUnitFiles Value="core;libraries\pasopencl;libraries\synapse;libraries\sphere10;libraries\hashlib4pascal;libraries\generics.collections;libraries\pascalcoin;libraries\paszlib"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <CodeGeneration>
@@ -58,6 +56,13 @@
         <OptimizationLevel Value="3"/>
       </Optimizations>
     </CodeGeneration>
+    <Linking>
+      <Debugging>
+        <GenerateDebugInfo Value="False"/>
+        <DebugInfoType Value="dsDwarf2Set"/>
+        <UseValgrind Value="True"/>
+      </Debugging>
+    </Linking>
   </CompilerOptions>
   <Debugging>
     <Exceptions Count="3">

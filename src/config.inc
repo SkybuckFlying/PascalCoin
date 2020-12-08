@@ -13,26 +13,37 @@
   PascalCoin configuration file to build
   **************************************
 
-  Choose ONLY ONE of directives:
+  Compiler directives definitions:
+  
+  NOTE: By default, only need to choose "TESTNET" or "PRODUCTION", all other directives are automatically selected
 
-    CHANGES ON 2.1.10 and V3: OpenSSL must be version 1.1
-
-    OPTIONS_BY_DEFAULT:
-      In Delphi = Synapse + OpenSSL v1.1
-      In FPC = Synapse + OpenSSL v1.1
-    DelphiSockets_OpenSSLv10
-    Synapse_OpenSSLv10
-    Synapse_OpenSSLv11
-
+  - TESTNET                 : Will compile a TESTNET version
+  - PRODUCTION              : Will compile a PRODUCTION (Main Net) version
+  
+  ( User does not need to define/undefine next values )
+  
+  - Use_CryptoLib4Pascal    : Will not use OpenSSL library, will use pascal native CryptoLib4Pascal
+  - Use_OpenSSL             : Will use OpenSSL library (Need version 1.1)
+  
+  - Synapse                 : Will use Synapse sockets (Preferred)
+  - DelphiSockets           : Will use Delphi Indy sockets (Use only for special purposes... for example for mobile apps)
+  
 }
-
-  {$DEFINE OPTIONS_BY_DEFAULT}
-  {.$DEFINE DelphiSockets_OpenSSLv10}
-  {.$DEFINE Synapse_OpenSSLv10}
-  {.$DEFINE Synapse_OpenSSLv11}
 
   {$DEFINE PRODUCTION}
   {.$DEFINE TESTNET}
+
+  // Activate to define CryptoLib4Pascal by default on all compilations
+  {.$DEFINE Use_CryptoLib4Pascal}
+  // Add the following paths to the project Search Path is this option is used
+  // .\libraries\cryptolib4pascal
+  // .\libraries\simplebaselib4pascal  
+
+  // Used to activate RandomHash in V4 hard-fork
+  {$DEFINE ACTIVATE_RANDOMHASH_V4}
+
+  // Account Key Storage is for memory reduction because uses a unified storage to store all public keys and then use only a pointer to them
+  {$DEFINE useAccountKeyStorage}
 
   // For GUI: Allows to show average time on blockchain explorer
   {$DEFINE SHOW_AVERAGE_TIME_STATS}
@@ -48,6 +59,20 @@
 
   // This will allow check safebox names list. Warning: This will slow app
   {.$DEFINE Check_Safebox_Names_Consistency}
+  
+  // This will assume that PoW on old protocols are true and will not check, usefull after enough time to increase validation speed. 
+  // Warning: Use only on versions after enough time since last protocol upgrade and non main-node versions
+  {$DEFINE ASSUME_VALID_POW_OLD_PROTOCOLS}
+  
+  // Activate ABSTRACTMEM library. Will use a virtual memory caching mechanism for efficient usage without high RAM requirements
+  {$DEFINE USE_ABSTRACTMEM}
+
+  // Activate GNUGETTEXT library
+  {$DEFINE USE_GNUGETTEXT}
+  
+  // Activate usage of TPCTemporalFileStream instead of TBytes in order to minimize mem usage
+  // This also fixes issue #207 High memory usage on FreePascal compiler
+  {$DEFINE USE_BIGBLOCKS_MEM_ON_DISK}
 
 { ********************************************************************
   Don't touch more code, it will addapt based on your preferences
@@ -57,43 +82,58 @@
 ERROR: You must select ONLY ONE option: PRODUCTION or TESTNET
 {$ENDIF}{$ELSE}{$DEFINE PRODUCTION}{$ENDIF}
 
-{$IFNDEF OPTIONS_BY_DEFAULT}{$IFNDEF DelphiSockets_OpenSSLv10}{$IFNDEF Synapse_OpenSSLv10}{$IFNDEF Synapse_OpenSSLv11}
-ERROR: You must select ONE option!
-{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
-{$IFDEF OPTIONS_BY_DEFAULT}
-  // By default are: Synapse + OpenSSLv11
-  {$DEFINE Synapse}
-  {$UNDEF OpenSSL10}
-  {$IFDEF DelphiSockets_OpenSSLv10}ERROR: You selected more than 1 option{$ENDIF}
-  {$IFDEF Synapse_OpenSSLv10}ERROR: You selected more than 1 option{$ENDIF}
-  {$IFDEF Synapse_OpenSSLv11}ERROR: You selected more than 1 option{$ENDIF}
-{$ELSE}
-  {$IFDEF DelphiSockets_OpenSSLv10}
-    {$IFDEF FPC}
-      ERROR: With Free Pascal you cannot choose compiler directive DelphiSockets_OpenSSLv10
-    {$ELSE}
-      {$UNDEF Synapse}
-      {$DEFINE OpenSSL10}
-    {$ENDIF}
-    {$IFDEF Synapse_OpenSSLv10}ERROR: You selected more than 1 option{$ENDIF}
-    {$IFDEF Synapse_OpenSSLv11}ERROR: You selected more than 1 option{$ENDIF}
-  {$ELSE}
-    {$IFDEF Synapse_OpenSSLv10}
-      {$DEFINE Synapse}
-      {$DEFINE OpenSSL10}
-      {$IFDEF Synapse_OpenSSLv11}ERROR: You selected more than 1 option{$ENDIF}
-    {$ELSE}
-      {$IFDEF FPC}
-        {$DEFINE Synapse}
-        {$UNDEF OpenSSL10}
-      {$ELSE}
-        ERROR: With Delphi you cannot choose compiler directive Synapse_OpenSSLv11
-      {$ENDIF}
-    {$ENDIF}
-  {$ENDIF}
+{$IF (not Defined(Use_OpenSSL)) and (not Defined(Use_CryptoLib4Pascal))}
+  {$DEFINE Use_OpenSSL}
+  {$UNDEF Use_CryptoLib4Pascal}
 {$ENDIF}
+
+{$IF (Defined(Use_OpenSSL)) and (Defined(Use_CryptoLib4Pascal))}
+ERROR: You must select ONLY ONE option: Use_OpenSSL or Use_CryptoLib4Pascal
+{$ENDIF}
+  
+{$IFDEF DARWIN}
+  {$UNDEF Use_OpenSSL}
+  {$DEFINE Use_CryptoLib4Pascal}
+{$ENDIF}
+  
+
+  {$IFDEF ANDROID} 
+    // Android usage (on Delphi) does not use Synapse
+    {$UNDEF Synapse}
+    {$DEFINE DelphiSockets}
+  {$ELSE}
+    {$DEFINE Synapse}
+    {$UNDEF DelphiSockets}
+  {$ENDIF}
+  {$UNDEF OpenSSL10}
+
+{$IFNDEF FPC}
+  // We are on Delphi compiler
+  {$IF Defined(ANDROID) or Defined(MACOS) or Defined(IOS) }
+    // On Delphi and Android/IOS/MAC environment, AnsiString is not available and use DelphiSockets instead of Synapse
+    {$DEFINE NO_ANSISTRING}
+    {$UNDEF Use_OpenSSL}
+    {$DEFINE Use_CryptoLib4Pascal}
+    {$UNDEF Synapse}
+    {$DEFINE DelphiSockets}
+  {$ELSE}
+    {$UNDEF NO_ANSISTRING}
+  {$ENDIF}
+  
+  {$IF COMPILERVERSION > 33}
+    {$DEFINE DELPHI_SYDNEY_PLUS}  
+  {$ENDIF}
+{$ELSE}
+  {$UNDEF USE_GNUGETTEXT}
+{$ENDIF}
+
 
 {$IFDEF OpenSSL10}
   ERROR: OpenSLL v1.0 is not longer valid, use OpenSSL v1.1 instead
+{$ENDIF}
+{$IFDEF PRODUCTION}
+{$IFDEF TESTING_NO_POW_CHECK}
+  ERROR: TESTING_NO_POW_CHECK not valid on PRODUCTION MODE! Use it for testing purposes only!
+{$ENDIF}
 {$ENDIF}
 

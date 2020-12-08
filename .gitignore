@@ -3,6 +3,13 @@
 *.exe
 *.identcache
 *.stat
+/src/*.app
+src/PascalCoinWallet
+src/PascalCoinWalletLazarus
+src/PascalCoinWalletExperimental
+*.dSYM*
+*.dbg
+*.res
 
 ## OpenSSL 
 libeay32.dll
@@ -16,7 +23,7 @@ libcrypto.so.1.1
 *.log
 
 # Lazarus-related changes
-*.dproj
+#*.dproj
 *.dproj.local
 *.lps
 *.dcu
@@ -30,3 +37,20 @@ backup/
 
 ## Development miner batch file
 Run*.bat
+
+## Bin folders (Unit test projects, etc)
+bin/
+
+## Lazarus macOS files
+src/ppas.sh
+
+## Delphi files
+__history/
+__recovery/
+dunit.ini
+*.res
+/*.DS_Store
+/PIP/*.DS_Store
+/PIP/resources/*.DS_Store
+/PIP/resources/PIP-0034A/*.DS_Store
+/src/*.tvsconfig

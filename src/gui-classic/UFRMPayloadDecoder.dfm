@@ -3,10 +3,10 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
   Top = 0
   ActiveControl = ebOphash
   BorderIcons = [biSystemMenu]
-  BorderStyle = bsSingle
+  BorderStyle = bsToolWindow
   Caption = 'Operation Information/Decoder'
-  ClientHeight = 406
-  ClientWidth = 674
+  ClientHeight = 458
+  ClientWidth = 691
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
@@ -68,13 +68,13 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
   object lblOperationTxt: TLabel
     Left = 90
     Top = 101
-    Width = 561
-    Height = 22
+    Width = 579
+    Height = 68
     AutoSize = False
     Caption = '000'
     Font.Charset = DEFAULT_CHARSET
     Font.Color = clBlack
-    Font.Height = -16
+    Font.Height = -13
     Font.Name = 'Tahoma'
     Font.Style = [fsBold]
     ParentFont = False
@@ -182,14 +182,18 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
   end
   object PageControl: TPageControl
     Left = 20
-    Top = 140
-    Width = 631
-    Height = 206
-    ActivePage = tsDecoded
+    Top = 191
+    Width = 653
+    Height = 202
+    ActivePage = tsDecodeMethods
     TabOrder = 2
     OnChanging = PageControlChanging
     object tsDecoded: TTabSheet
       Caption = 'Payload'
+      ExplicitLeft = 0
+      ExplicitTop = 0
+      ExplicitWidth = 0
+      ExplicitHeight = 178
       object Label7: TLabel
         Left = 15
         Top = 94
@@ -221,7 +225,7 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
       object memoDecoded: TMemo
         Left = 15
         Top = 111
-        Width = 591
+        Width = 618
         Height = 55
         TabStop = False
         Font.Charset = DEFAULT_CHARSET
@@ -239,7 +243,7 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
       object memoOriginalPayloadInHexa: TMemo
         Left = 15
         Top = 28
-        Width = 591
+        Width = 618
         Height = 55
         TabStop = False
         Color = clBtnFace
@@ -268,13 +272,9 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
     object tsDecodeMethods: TTabSheet
       Caption = 'Decode methods'
       ImageIndex = 1
-      ExplicitLeft = 0
-      ExplicitTop = 0
-      ExplicitWidth = 0
-      ExplicitHeight = 0
       object lblPasswordsInfo: TLabel
         Left = 235
-        Top = 162
+        Top = 143
         Width = 81
         Height = 13
         Caption = 'lblPasswordsInfo'
@@ -309,8 +309,8 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
       object memoPasswords: TMemo
         Left = 235
         Top = 10
-        Width = 371
-        Height = 146
+        Width = 390
+        Height = 127
         ScrollBars = ssBoth
         TabOrder = 3
         OnChange = cbMethodPublicPayloadClick
@@ -321,7 +321,6 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
         Width = 75
         Height = 25
         Caption = 'Save'
-        DoubleBuffered = True
         Glyph.Data = {
           DE010000424DDE01000000000000760000002800000024000000120000000100
           0400000000006801000000000000000000001000000000000000000000000000
@@ -340,20 +339,18 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
           333A333333333333333338330000333333333333333333333333333333333333
           0000}
         NumGlyphs = 2
-        ParentDoubleBuffered = False
         TabOrder = 4
         OnClick = bbSaveMethodsClick
       end
     end
   end
   object bbClose: TBitBtn
-    Left = 572
-    Top = 362
-    Width = 79
+    Left = 560
+    Top = 413
+    Width = 97
     Height = 25
     Cancel = True
     Caption = 'Close'
-    DoubleBuffered = True
     Glyph.Data = {
       76010000424D7601000000000000760000002800000020000000100000000100
       04000000000000010000120B0000120B00001000000000000000000000000000
@@ -369,16 +366,14 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
       5990555555555555577755555555555555555555555555555555}
     ModalResult = 2
     NumGlyphs = 2
-    ParentDoubleBuffered = False
     TabOrder = 3
   end
   object bbFind: TBitBtn
     Left = 599
     Top = 19
-    Width = 52
+    Width = 74
     Height = 25
     Caption = '&Find'
-    DoubleBuffered = True
     Glyph.Data = {
       36030000424D3603000000000000360000002800000010000000100000000100
       18000000000000030000120B0000120B00000000000000000000FF00FF4A667C
@@ -406,7 +401,6 @@ object FRMPayloadDecoder: TFRMPayloadDecoder
       FF00FFFF00FFFF00FFFF00FFFF00FFAD827FC9AA9EEFE0B7EFDFB2E7CEACB890
       86B89086FF00FFFF00FFFF00FFFF00FFFF00FFFF00FFFF00FFFF00FFFF00FFFF
       00FFFF00FFBA968ABB988CB79188FF00FFFF00FFFF00FFFF00FF}
-    ParentDoubleBuffered = False
     TabOrder = 1
     TabStop = False
     OnClick = bbFindClick

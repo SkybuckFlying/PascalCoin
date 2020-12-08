@@ -1,21 +1,24 @@
 unit UFRMPayloadDecoder;
 
-{$IFDEF FPC}
-  {$MODE Delphi}
-{$ENDIF}
-
 { Copyright (c) 2016 by Albert Molina
 
   Distributed under the MIT software license, see the accompanying file LICENSE
   or visit http://www.opensource.org/licenses/mit-license.php.
 
-  This unit is a part of Pascal Coin, a P2P crypto currency without need of
-  historical operations.
+  This unit is a part of the PascalCoin Project, an infinitely scalable
+  cryptocurrency. Find us here:
+  Web: https://www.pascalcoin.org
+  Source: https://github.com/PascalCoin/PascalCoin
 
-  If you like it, consider a donation using BitCoin:
+  If you like it, consider a donation using Bitcoin:
   16K3HCZRhFUtM8GdWRcfKeaa6KsuyxZaYk
 
-  }
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
+
+{$IFDEF FPC}
+  {$MODE Delphi}
+{$ENDIF}
 
 interface
 
@@ -103,7 +106,7 @@ implementation
   {$R *.lfm}
 {$ENDIF}
 
-Uses UNode, UTime, UECIES, UAES, UAccounts, UFRMMemoText;
+Uses {$IFDEF USE_GNUGETTEXT}gnugettext,{$ENDIF}UNode, UTime, UPCEncryption, UAccounts, UFRMMemoText, UBaseTypes;
 
 { TFRMPayloadDecoder }
 
@@ -150,7 +153,7 @@ begin
   end;
   try
     r := TCrypto.HexaToRaw(trim(OpHash));
-    if (r='') then begin
+    if (Length(r)=0) then begin
       raise Exception.Create('Value is not an hexadecimal string');
     end;
     // Build 2.1.4 new decoder option: Check if OpHash is a posible double spend
@@ -217,6 +220,8 @@ end;
 
 procedure TFRMPayloadDecoder.FormCreate(Sender: TObject);
 begin
+  {$IFDEF USE_GNUGETTEXT}TranslateComponent(self);{$ENDIF}
+  //
   FSemaphor := true;
   try
     FWalletKeys := Nil;
@@ -335,7 +340,7 @@ begin
     else if Value.Fee=0 then lblFee.Font.Color := clGray
     else lblFee.Font.Color := clRed;
     ebOpHash.text := TCrypto.ToHexaString(Value.OperationHash);
-    memoOriginalPayloadInHexa.Lines.Text := TCrypto.ToHexaString(Value.OriginalPayload);
+    memoOriginalPayloadInHexa.Lines.Text := TCrypto.ToHexaString(Value.OriginalPayload.payload_raw);
     if Assigned(FWalletKeys) then begin
       cbMethodPublicPayload.Checked := FAppParams.ParamByName['PayloadDecoder.notencrypted'].GetAsBoolean(true);
       cbUsingPrivateKeys.Checked := FAppParams.ParamByName['PayloadDecoder.usingprivatekeys'].GetAsBoolean(true);
@@ -357,7 +362,7 @@ begin
 end;
 
 procedure TFRMPayloadDecoder.TryToDecode;
-  Function UseWallet(Const raw : TRawBytes; var Decrypted : AnsiString; var WalletKey : TWalletKey) : Boolean;
+  Function UseWallet(Const raw : TRawBytes; var Decrypted : TRawBytes; var WalletKey : TWalletKey) : Boolean;
   Var i : Integer;
   begin
     Result := false;
@@ -366,7 +371,7 @@ procedure TFRMPayloadDecoder.TryToDecode;
     for i := 0 to FWalletKeys.Count - 1 do begin
       WalletKey := FWalletKeys.Key[i];
       If Assigned(WalletKey.PrivateKey) then begin
-        If ECIESDecrypt(WalletKey.PrivateKey.EC_OpenSSL_NID,WalletKey.PrivateKey.PrivateKey,false,raw,Decrypted) then begin
+        if TPCEncryption.DoPascalCoinECIESDecrypt(WalletKey.PrivateKey.PrivateKey,raw,Decrypted) then begin
           Result := true;
           exit;
         end;
@@ -375,12 +380,12 @@ procedure TFRMPayloadDecoder.TryToDecode;
 
   end;
 
-  Function  UsePassword(const raw : TRawBytes; var Decrypted,PasswordUsed : AnsiString) : Boolean;
+  Function  UsePassword(const raw : TRawBytes; var Decrypted : TRawBytes; var PasswordUsed : AnsiString) : Boolean;
   Var i : Integer;
   Begin
     Result := false;
     for i := 0 to memoPasswords.Lines.Count - 1 do begin
-      if (TAESComp.EVP_Decrypt_AES256(raw,memoPasswords.Lines[i],Decrypted)) then begin
+      if TPCEncryption.DoPascalCoinAESDecrypt(raw,TEncoding.ANSI.GetBytes(memoPasswords.Lines[i]),Decrypted) then begin
         if (TCrypto.IsHumanReadable(Decrypted)) then begin
           Result := true;
           PasswordUsed := memoPasswords.Lines[i];
@@ -393,25 +398,30 @@ procedure TFRMPayloadDecoder.TryToDecode;
 
 Var raw : TRawBytes;
   WalletKey : TWalletKey;
-  Decrypted,PasswordUsed : AnsiString;
+  Decrypted : TRawBytes;
+  PasswordUsed : AnsiString;
   ok : boolean;
 begin
   ok := true;
+  // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+  // TODO:
+  // Needs to check valid .payload_type based on PIP-0027
+  // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
   if Assigned(FWalletKeys) And Assigned(FAppParams) then begin
-    raw := FOpResume.OriginalPayload;
-    if raw<>'' then begin
+    raw := FOpResume.OriginalPayload.payload_raw;
+    if Length(raw)>0 then begin
       // First try to a human readable...
       if (cbMethodPublicPayload.Checked) and (TCrypto.IsHumanReadable(raw)) then begin
         if cbShowAsHexadecimal.Checked then memoDecoded.Lines.Text := TCrypto.ToHexaString(raw)
-        else memoDecoded.Lines.Text := raw;
+        else memoDecoded.Lines.Text := TEncoding.ANSI.GetString(raw);
         lblDecodedMethod.Caption := 'Not encrypted payload';
       end else if (cbUsingPrivateKeys.Checked) And (UseWallet(raw,Decrypted,WalletKey)) then begin
         if cbShowAsHexadecimal.Checked then memoDecoded.Lines.Text := TCrypto.ToHexaString(Decrypted)
-        else memoDecoded.Lines.Text := Decrypted;
+        else memoDecoded.Lines.Text := TEncoding.ANSI.GetString(Decrypted);
         lblDecodedMethod.Caption := 'Encrypted with EC '+TAccountComp.GetECInfoTxt(WalletKey.PrivateKey.EC_OpenSSL_NID);
       end else if (cbUsingPasswords.Checked) And (UsePassword(raw,Decrypted,PasswordUsed)) then begin
         if cbShowAsHexadecimal.Checked then memoDecoded.Lines.Text := TCrypto.ToHexaString(Decrypted)
-        else memoDecoded.Lines.Text := Decrypted;
+        else memoDecoded.Lines.Text := TEncoding.ANSI.GetString(Decrypted);
         lblDecodedMethod.Caption := 'Encrypted with pwd:"'+PasswordUsed+'"';
       end else begin
         memoDecoded.Lines.Text := 'CANNOT DECRYPT';

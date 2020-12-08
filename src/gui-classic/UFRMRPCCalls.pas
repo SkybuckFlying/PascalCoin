@@ -153,7 +153,9 @@ end;
 
 procedure TFRMRPCCalls.ShowCallInfo(infoType: TInfoType; value: String);
 begin
+  mCalls.Lines.BeginUpdate;
   mCalls.Lines.Add(Format('%s [%s] %s',[FormatDateTime('hh:nn:ss.zzz',Now),CT_TIntoType_Str[infoType],value]));
+  mCalls.Lines.EndUpdate;
 end;
 
 procedure TFRMRPCCalls.DoSendJSON(json: TPCJSONObject);
@@ -186,9 +188,9 @@ begin
   ms := TMemoryStream.Create;
   Try
     ms.Size := 0;
-    TStreamOp.LoadStreamFromRaw(ms,json.ToJSON(False));
+    TStreamOp.LoadStreamFromRaw(ms,TEncoding.ANSI.GetBytes(json.ToJSON(False)));
     If Not DoHttpPostBinary(ebServerURL.Text,ms) then ShowCallInfo(error,'no valid response from '+ebServerURL.Text);
-    s := TStreamOp.SaveStreamToRaw(ms);
+    s := TEncoding.ANSI.GetString(TStreamOp.SaveStreamToRaw(ms));
     ShowCallInfo(response,s);
     if DecodeJSONResult(s,jsonResult) then begin
       Try

@@ -1,23 +1,28 @@
 unit UPoolMining;
 
-{$IFDEF FPC}
-  {$MODE Delphi}
-{$ENDIF}
-
 { Copyright (c) 2016 by Albert Molina
 
   Distributed under the MIT software license, see the accompanying file LICENSE
   or visit http://www.opensource.org/licenses/mit-license.php.
 
-  This unit is a part of Pascal Coin, a P2P crypto currency without need of
-  historical operations.
+  This unit is a part of the PascalCoin Project, an infinitely scalable
+  cryptocurrency. Find us here:
+  Web: https://www.pascalcoin.org
+  Source: https://github.com/PascalCoin/PascalCoin
 
-  If you like it, consider a donation using BitCoin:
+  If you like it, consider a donation using Bitcoin:
   16K3HCZRhFUtM8GdWRcfKeaa6KsuyxZaYk
 
-  }
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
+
+{$IFDEF FPC}
+  {$MODE Delphi}
+{$ENDIF}
 
 interface
+
+{$I ./../config.inc}
 
 Uses
 {$IFnDEF FPC}
@@ -25,16 +30,22 @@ Uses
 {$ELSE}
   {LCLIntf, LCLType, LMessages,}
 {$ENDIF}
-  UTCPIP, SysUtils, UThread, SyncObjs, Classes, UJSONFunctions, UAES, UNode,
-  UCrypto, UAccounts, UConst, UBlockChain;
+  UTCPIP, SysUtils, UThread, SyncObjs, Classes, UJSONFunctions, UPCEncryption, UNode,
+  UCrypto, UAccounts, UConst, UBlockChain, UBaseTypes, UPCDataTypes,
+  {$IFNDEF FPC}System.Generics.Collections{$ELSE}Generics.Collections{$ENDIF};
 
 Const
   CT_PoolMining_Method_STATUS = 'status';
   CT_PoolMining_Method_MINER_NOTIFY = 'miner-notify'; // Server message to clients to update miners PoW data
   CT_PoolMining_Method_MINER_SUBMIT = 'miner-submit'; // Client message to server to notify a PoW found
+  CT_PoolMining_Method_MINER_RANDOMHASH = 'rh'; // Client message to server to calculate a hash based on RandomHash algo
+  CT_PoolMining_Method_MINER_RANDOMHASH2 = 'rh2'; // Client message to server to calculate a hash based on RandomHash2 algo
 
-  CT_PoolMining_Method_STRATUM_MINING_AUTHORIZE = 'mining-authorize';
-  CT_PoolMining_Method_STRATUM_MINING_SUBSCRIBE = 'mining-subscribe';
+  CT_PoolMining_Method_STRATUM_MINING_AUTHORIZE = 'mining.authorize';
+  CT_PoolMining_Method_STRATUM_MINING_SUBSCRIBE = 'mining.subscribe';
+  CT_PoolMining_Method_STRATUM_MINING_SET_DIFFICULTY = 'mining.set_difficulty';
+  CT_PoolMining_Method_STRATUM_MINING_NOTIFY = 'mining.notify';
+  CT_PoolMining_Method_STRATUM_MINING_SUBMIT = 'mining.submit';
 
 Type
   TMinerValuesForWork = Record
@@ -46,9 +57,19 @@ Type
      target : Cardinal;
      timestamp : Cardinal;
      target_pow : TRawBytes;
-     // Stratum jobid
+     // Stratum information
      jobid : String;
+     extraNOnce2_Size : Integer;
+     extraNOnce2_Used : TRawBytes;
   End;
+
+  { TMinerValuesForWork_HELPER }
+
+  TMinerValuesForWork_HELPER = record helper for TMinerValuesForWork
+     function FinalPayload : TRawBytes;
+     function IsStratum : Boolean;
+  end;
+
 
   TProcessJSONObjectEvent = Procedure (json : TPCJSONObject; method : String) of object;
 
@@ -60,7 +81,7 @@ Type
     FLockProcessBuffer : TPCCriticalSection;
     FReceivedBuffer : TBytes;
     FLockReceivedBuffer : TPCCriticalSection;
-    FPendingResponseMessages : TPCThreadList;
+    FPendingResponseMessages : TPCThreadList<Pointer>;
   protected
   public
     Constructor Create(AOwner : TComponent); override;
@@ -73,7 +94,7 @@ Type
     Function GetNewId : Cardinal;
   End;
 
-  TPoolType = (ptNone,ptIdentify);
+  TPoolType = (ptSolomine,ptPoolSubscription);
 
   { TPoolMinerClient }
 
@@ -82,10 +103,12 @@ Type
     FMinerValuesForWork: TMinerValuesForWork;
     FOnMinerMustChangeValues: TNotifyEvent;
     FPassword: String;
-    FPoolFinalMinerName: String;
+    FPoolFinalMinerName: TRawBytes;
     FPoolType: TPoolType;
     FStratum_Target_PoW: TRawBytes;
     FUserName: String;
+    FStratumAuthorized : Boolean;
+    FStratum_ExtraNOnce2_Size: Integer;
     procedure SetMinerValuesForWork(const Value: TMinerValuesForWork);
   protected
     Procedure DoOnConnect; Override;
@@ -93,13 +116,15 @@ Type
     Constructor Create(AOwner : TComponent); override;
     Property OnMinerMustChangeValues : TNotifyEvent read FOnMinerMustChangeValues write FOnMinerMustChangeValues;
     Property MinerValuesForWork : TMinerValuesForWork read FMinerValuesForWork write SetMinerValuesForWork;
-    Procedure SubmitBlockFound(Const MinerValuesToGenerateBlock : TMinerValuesForWork; const Payload: TRawBytes; Timestamp, NOnce: Cardinal);
+    Procedure SubmitBlockFound(Const MinerValuesToGenerateBlock : TMinerValuesForWork; const Payload: TRawBytes; Timestamp, NOnce: Cardinal; const AObtainedPoW : TRawBytes);
     Procedure DoProcessJSONObject(json : TPCJSONObject; ResponseMethod : String);
     Property PoolType : TPoolType read FPoolType write FPoolType;
     Property UserName : String read FUserName write FUserName;
     Property Password : String read FPassword write FPassword;
-    Property PoolFinalMinerName : String read FPoolFinalMinerName;
+    Property PoolFinalMinerName : TRawBytes read FPoolFinalMinerName;
     Property Stratum_Target_PoW : TRawBytes read FStratum_Target_PoW;
+    Property Stratum_Authorized : Boolean read FStratumAuthorized write FStratumAuthorized;
+    Property Stratum_ExtraNOnce2_Size : Integer read FStratum_ExtraNOnce2_Size write FStratum_ExtraNOnce2_Size;
   End;
 
   TPoolMiningServer = Class;
@@ -124,7 +149,7 @@ Type
     FClientsWins: Integer;
     FClientsCount: Integer;
     FOnMiningServerNewBlockFound: TNotifyEvent;
-    FPoolJobs : TPCThreadList;
+    FPoolJobs : TPCThreadList<Pointer>;
     FPoolThread : TPoolMiningServerThread;
     FMinerOperations : TPCOperationsComp;
     FMaxOperationsPerBlock: Integer;
@@ -164,7 +189,7 @@ var
 
 implementation
 
-Uses ULog, Variants, UTime, UNetProtocol, UBaseTypes;
+Uses ULog, Variants, UTime, UNetProtocol;
 
 Type TPendingResponseMessage = Record
        sendDateTime : TDateTime;
@@ -185,6 +210,27 @@ Begin
   end;
 End;
 
+{ TMinerValuesForWork_HELPER }
+
+function TMinerValuesForWork_HELPER.FinalPayload: TRawBytes;
+begin
+  if IsStratum then begin
+    // Check extraNOnce2 valid value
+    while ( Self.extraNOnce2_Size>Length(Self.extraNOnce2_Used) ) do begin
+      SetLength(Self.extraNOnce2_Used, Length(Self.extraNOnce2_Used) + 1);
+      Self.extraNOnce2_Used[ High(Self.extraNOnce2_Used) ] := 48; // 48 = Char '0'
+    end;
+  end;
+  SetLength(Result, Length(Self.payload_start) + Length(Self.extraNOnce2_Used) );
+  Move(Self.payload_start[0],Result[0],Length(Self.payload_start));
+  Move(Self.extraNOnce2_Used[0],Result[Length(Self.payload_start)],Length(Self.extraNOnce2_Used));
+end;
+
+function TMinerValuesForWork_HELPER.IsStratum: Boolean;
+begin
+  Result := Length(Self.jobid)>0;
+end;
+
 { TJSONRPCTcpIpClient }
 
 constructor TJSONRPCTcpIpClient.Create(AOwner: TComponent);
@@ -194,12 +240,12 @@ begin
   SetLength(FReceivedBuffer,0);
   FLockProcessBuffer := TPCCriticalSection.Create('TJSONRPCTcpIpClient_LockProcessBuffer');
   FLockReceivedBuffer := TPCCriticalSection.Create('TJSONRPCTcpIpClient_LockReceivedBuffer');
-  FPendingResponseMessages := TPCThreadList.Create('TJSONRPCTcpIpClient_PendingResponseMessages');
+  FPendingResponseMessages := TPCThreadList<Pointer>.Create('TJSONRPCTcpIpClient_PendingResponseMessages');
 end;
 
 destructor TJSONRPCTcpIpClient.Destroy;
 var P : PPendingResponseMessage;
-  l : TList;
+  l : TList<Pointer>;
   i : Integer;
 begin
   l := FPendingResponseMessages.LockList;
@@ -227,7 +273,7 @@ var last_bytes_read : Integer;
   i,lasti : Integer;
   continue : Boolean;
   procedure FlushBufferPendingMessages(doSearchId : Boolean; idValue : Integer);
-  var l : TList;
+  var l : TList<Pointer>;
     i : Integer;
     P : PPendingResponseMessage;
   Begin
@@ -297,7 +343,7 @@ begin
         if (ms.Size)>0 then begin
           lasti := length(FReceivedBuffer);
           setLength(FReceivedBuffer,length(FReceivedBuffer)+ms.Size);
-          CopyMemory(@FReceivedBuffer[lasti],ms.Memory,ms.Size);
+          move(ms.Memory^,FReceivedBuffer[lasti],ms.Size);
           last_bytes_read := ms.Size;
           ms.Size := 0;
         end;
@@ -311,10 +357,11 @@ begin
           Try
             if jsonData is TPCJSONObject then begin
               jsonObject.Assign(jsonData);
-              If (Not jsonObject.IsNull('id')) And (jsonObject.IndexOfName('method')<0) then begin
+              If (Not jsonObject.IsNull('id')) then begin
                 // Is a Response!
                 FlushBufferPendingMessages(true,jsonObject.AsInteger('id',0));
               end;
+              TLog.NewLog(ltdebug,ClassName,'Received JSON: '+jsonObject.ToJSON(false));
               Result := true;
               exit;
             end else begin
@@ -370,8 +417,6 @@ begin
       stream.Write(b,1);
       b := 10;
       stream.Write(b,1);
-      b := 0;
-      stream.Write(b,1);
       stream.Position := 0;
       WriteBufferToSend(stream);
     finally
@@ -387,7 +432,6 @@ Var json : TPCJSONObject;
   stream : TMemoryStream;
   b : Byte;
   P : PPendingResponseMessage;
-  l : TList;
 begin
   json := TPCJSONObject.Create;
   Try
@@ -408,7 +452,7 @@ begin
       P^.method:=method;
       FPendingResponseMessages.Add(P);
     end;
-    TLog.NewLog(ltInfo,Classname,'Sending JSON: '+json.ToJSON(false));
+    TLog.NewLog(ltDebug,Classname,'Sending JSON: '+json.ToJSON(false));
     stream := TMemoryStream.Create;
     try
       json.SaveToStream(stream);
@@ -510,10 +554,12 @@ Type
 procedure TPoolMiningServer.CaptureNewJobAndSendToMiners;
 Var P, PToDelete : PPoolJob;
   i : Integer;
-  l : TList;
+  l : TList<Pointer>;
+  l2 : TList<TNetTcpIpClient>;
   doAdd : Boolean;
   params : TPCJSONObject;
   OpB : TOperationBlock;
+  LLockedMempool : TPCOperationsComp;
 begin
   if Not Active then exit;
   if FClientsCount<=0 then exit;
@@ -524,19 +570,24 @@ begin
     if l.count=0 then doAdd := true
     else begin
       P := l[l.Count-1];
-      if (FNodeNotifyEvents.Node.Operations.OperationsHashTree.HashTree<>P^.OperationsComp.OperationsHashTree.HashTree) then begin
-        doAdd := (P^.SentDateTime + EncodeTime(0,0,CT_WAIT_SECONDS_BEFORE_SEND_NEW_JOB,0)) < Now;
-      end else begin
-        // No new operations waiting to be sent, but to prevent "old time mining", we will send new job with time:
-        doAdd := ((P^.SentDateTime + EncodeTime(0,0,CT_MAX_SECONDS_BETWEEN_JOBS,0)) < Now);
+      LLockedMempool := FNodeNotifyEvents.Node.LockMempoolRead;
+      try
+        if (Not TBaseType.Equals(LLockedMempool.OperationsHashTree.HashTree,P^.OperationsComp.OperationsHashTree.HashTree)) then begin
+          doAdd := (P^.SentDateTime + EncodeTime(0,0,CT_WAIT_SECONDS_BEFORE_SEND_NEW_JOB,0)) < Now;
+        end else begin
+          // No new operations waiting to be sent, but to prevent "old time mining", we will send new job with time:
+          doAdd := ((P^.SentDateTime + EncodeTime(0,0,CT_MAX_SECONDS_BETWEEN_JOBS,0)) < Now);
+        end;
+      finally
+        FNodeNotifyEvents.Node.UnlockMempoolRead;
       end;
     end;
     if doAdd then begin
       New(P);
       P^.SentDateTime := now;
       P^.SentMinTimestamp := TNetData.NetData.NetworkAdjustedTime.GetAdjustedTime;
-      if (P^.SentMinTimestamp<FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.timestamp) then begin
-        P^.SentMinTimestamp := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.timestamp;
+      if (P^.SentMinTimestamp<FNodeNotifyEvents.Node.Bank.LastOperationBlock.timestamp) then begin
+        P^.SentMinTimestamp := FNodeNotifyEvents.Node.Bank.LastOperationBlock.timestamp;
       end;
       FillMinerOperations;
       P^.OperationsComp := TPCOperationsComp.Create(Nil);
@@ -545,15 +596,15 @@ begin
       P^.OperationsComp.BlockPayload := FMinerPayload;
       P^.OperationsComp.timestamp := P^.SentMinTimestamp; // Best practices 1.5.3
       OpB := P^.OperationsComp.OperationBlock;
-      if (OpB.block<>0) And (OpB.block <> (FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.block+1)) then begin
+      if (OpB.block<>0) And (OpB.block <> (FNodeNotifyEvents.Node.Bank.LastOperationBlock.block+1)) then begin
         // A new block is generated meanwhile ... do not include
-        TLog.NewLog(ltDebug,ClassName,'Generated a new block meanwhile ... '+TPCOperationsComp.OperationBlockToText(OpB)+'<>'+TPCOperationsComp.OperationBlockToText(FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock));
+        TLog.NewLog(ltDebug,ClassName,'Generated a new block meanwhile ... '+TPCOperationsComp.OperationBlockToText(OpB)+'<>'+TPCOperationsComp.OperationBlockToText(FNodeNotifyEvents.Node.Bank.LastOperationBlock));
         P^.OperationsComp.Free;
         Dispose(P);
         P := Nil;
       end else begin
         i := l.Add(P);
-        TLog.NewLog(ltDebug,ClassName,'Added new job '+IntToStr(i+1)+'/'+IntToStr(l.Count));
+        {$IFDEF HIGHLOG}TLog.NewLog(ltDebug,ClassName,'Added new job '+IntToStr(i+1)+'/'+IntToStr(l.Count));{$ENDIF}
       end;
     end;
     // Clean buffer jobs
@@ -564,19 +615,16 @@ begin
       Dispose(PToDelete);
       TLog.NewLog(ltDebug,ClassName,'Deleted Job 1 from buffer, now count:'+inttostr(l.Count));
     end;
-  Finally
-    FPoolJobs.UnlockList;
-  End;
   if (doAdd) And (Assigned(P)) then begin
     params := TPCJSONObject.Create;
     Try
-      l := NetTcpIpClientsLock;
+      l2 := NetTcpIpClientsLock;
       Try
-        for i := 0 to l.Count - 1 do begin
+        for i := 0 to l2.Count - 1 do begin
           if Not Active then exit;
-          SendJobToMiner(P^.OperationsComp,l[i],false,null);
+          SendJobToMiner(P^.OperationsComp,l2[i] as TJSONRPCTcpIpClient,false,null);
         end;
-        TLog.NewLog(ltDebug,ClassName,'Sending job to miners: '+TPCOperationsComp.OperationBlockToText(P^.OperationsComp.OperationBlock)+' Cache blocks:'+Inttostr(l.Count));
+        {$IFDEF HIGHLOG}TLog.NewLog(ltDebug,ClassName,'Sending job to miners: '+TPCOperationsComp.OperationBlockToText(P^.OperationsComp.OperationBlock)+' Cache blocks:'+Inttostr(l2.Count));{$ENDIF}
       Finally
         NetTcpIpClientsUnlock;
       End;
@@ -584,12 +632,15 @@ begin
       params.Free;
     End;
   end;
+  Finally
+    FPoolJobs.UnlockList;
+  End;
 end;
 
 procedure TPoolMiningServer.ClearPoolJobs;
 Var P : PPoolJob;
   i : Integer;
-  l : TList;
+  l : TList<Pointer>;
 begin
   l := FPoolJobs.LockList;
   Try
@@ -620,8 +671,8 @@ begin
   FNodeNotifyEvents.Node := TNode.Node;
   FMinerOperations := TPCOperationsComp.Create(FNodeNotifyEvents.Node.Bank);
   FMinerAccountKey := CT_TECDSA_Public_Nul;
-  FMinerPayload := '';
-  FPoolJobs := TPCThreadList.Create('TPoolMiningServer_PoolJobs');
+  FMinerPayload := Nil;
+  FPoolJobs := TPCThreadList<Pointer>.Create('TPoolMiningServer_PoolJobs');
   FPoolThread := TPoolMiningServerThread.Create(Self);
   FMax0FeeOperationsPerBlock := CT_MAX_0_fee_operations_per_block_by_miner;
   FMaxOperationsPerBlock := CT_MAX_Operations_per_block_by_miner;
@@ -648,6 +699,7 @@ Var method : String;
     id_value : Variant;
     i : Integer;
   response_result : TPCJSONObject;
+  LDigest : TRawBytes;
 begin
   If ResponseMethod<>'' then begin
     method := ResponseMethod;
@@ -665,19 +717,20 @@ begin
   if method=CT_PoolMining_Method_STATUS then begin
     response_result := TPCJSONObject.Create;
     Try
-      response_result.GetAsVariant('block').Value := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.block;
-      response_result.GetAsVariant('account_key').Value := TCrypto.ToHexaString( TAccountComp.AccountKey2RawString(FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.account_key) );
-      response_result.GetAsVariant('reward').Value := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.reward;
-      response_result.GetAsVariant('fee').Value := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.fee;
-      response_result.GetAsVariant('p_version').Value := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.protocol_version;
-      response_result.GetAsVariant('p_available').Value := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.protocol_available;
-      response_result.GetAsVariant('timestamp').Value := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.timestamp;
-      response_result.GetAsVariant('target').Value := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.compact_target;
-      response_result.GetAsVariant('nonce').Value := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.nonce;
-      response_result.GetAsVariant('payload').Value := TCrypto.ToHexaString( FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.block_payload );
-      response_result.GetAsVariant('initial_sbh').Value := TCrypto.ToHexaString( FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.initial_safe_box_hash );
-      response_result.GetAsVariant('operations_hash').Value := TCrypto.ToHexaString( FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.operations_hash );
-      response_result.GetAsVariant('pow').Value := TCrypto.ToHexaString( FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.proof_of_work );
+      response_result.GetAsVariant('block').Value := FNodeNotifyEvents.Node.Bank.LastOperationBlock.block;
+      response_result.GetAsVariant('account_key').Value := TCrypto.ToHexaString( TAccountComp.AccountKey2RawString(FNodeNotifyEvents.Node.Bank.LastOperationBlock.account_key) );
+      response_result.GetAsVariant('reward').Value := FNodeNotifyEvents.Node.Bank.LastOperationBlock.reward;
+      response_result.GetAsVariant('fee').Value := FNodeNotifyEvents.Node.Bank.LastOperationBlock.fee;
+      response_result.GetAsVariant('p_version').Value := FNodeNotifyEvents.Node.Bank.LastOperationBlock.protocol_version;
+      response_result.GetAsVariant('p_available').Value := FNodeNotifyEvents.Node.Bank.LastOperationBlock.protocol_available;
+      response_result.GetAsVariant('timestamp').Value := FNodeNotifyEvents.Node.Bank.LastOperationBlock.timestamp;
+      response_result.GetAsVariant('target').Value := FNodeNotifyEvents.Node.Bank.LastOperationBlock.compact_target;
+      response_result.GetAsVariant('nonce').Value := FNodeNotifyEvents.Node.Bank.LastOperationBlock.nonce;
+      response_result.GetAsVariant('payload').Value := TCrypto.ToHexaString( FNodeNotifyEvents.Node.Bank.LastOperationBlock.block_payload );
+      response_result.GetAsVariant('initial_sbh').Value := TCrypto.ToHexaString( FNodeNotifyEvents.Node.Bank.LastOperationBlock.initial_safe_box_hash );
+      response_result.GetAsVariant('operations_hash').Value := TCrypto.ToHexaString( FNodeNotifyEvents.Node.Bank.LastOperationBlock.operations_hash );
+      response_result.GetAsVariant('pow').Value := TCrypto.ToHexaString( FNodeNotifyEvents.Node.Bank.LastOperationBlock.proof_of_work );
+      response_result.GetAsVariant('previous_pow').Value := TCrypto.ToHexaString( FNodeNotifyEvents.Node.Bank.LastOperationBlock.previous_proof_of_work );
       Client.SendJSONRPCResponse(response_result,id_value);
     Finally
       response_result.Free;
@@ -687,7 +740,37 @@ begin
   end else if method=CT_PoolMining_Method_MINER_SUBMIT then begin
     // Try to submit a PoW
     if params.Count=1 then MinerSubmit(Client,params.GetAsObject(0),id_value)
-    else TLog.NewLog(lterror,ClassName,'Invalid params array of method '+method);
+    else begin
+      Client.SendJSONRPCErrorResponse(id_value,'params must be 1-count JSON array');
+      TLog.NewLog(lterror,ClassName,'Invalid params array of method '+method);
+    end;
+  end else if (method=CT_PoolMining_Method_MINER_RANDOMHASH) or (method=CT_PoolMining_Method_MINER_RANDOMHASH2) then begin
+    //
+    if params.Count<>1 then begin
+      Client.SendJSONRPCErrorResponse(id_value,'params must be 1-count JSON array');
+    end else if (params.Items[0] is TPCJSONVariantValue) then begin
+      // Check the digest:
+      if Not TCrypto.HexaToRaw( params.GetAsVariant(0).AsString(''), LDigest ) then begin
+        Client.SendJSONRPCErrorResponse(id_value,'array does not contain an hexastring');
+      end else begin
+        response_result := TPCJSONObject.Create;
+        Try
+          response_result.GetAsVariant('digest').Value := LDigest.ToHexaString;
+          if (method=CT_PoolMining_Method_MINER_RANDOMHASH) then begin
+            // RandomHash 1 algo
+            response_result.GetAsVariant('hash').Value := TCrypto.DoRandomHash(LDigest).ToHexaString;
+            response_result.GetAsVariant('algo').Value := 'rh';
+          end else begin
+            // RandomHash 2 algo
+            response_result.GetAsVariant('hash').Value := TCrypto.DoRandomHash2(LDigest).ToHexaString;
+            response_result.GetAsVariant('algo').Value := 'rh2';
+          end;
+          Client.SendJSONRPCResponse(response_result,id_value);
+        Finally
+          response_result.Free;
+        End;
+      end;
+    end;
   end else begin
     // Invalid command
     if (not VarIsNull(id_value)) then begin
@@ -706,24 +789,23 @@ var tree : TOperationsHashTree;
     tree.AddOperationToHashTree(Op);
   End;
 Var i,j : Integer;
-  MasterOp : TPCOperationsComp;
+  LLockedMempool : TPCOperationsComp;
   op : TPCOperation;
-  Var errors : AnsiString;
+  errors : String;
 begin
-  MasterOp := FNodeNotifyEvents.Node.Operations;
-  MasterOp.Lock;
+  LLockedMempool := FNodeNotifyEvents.Node.LockMempoolRead;
   Try
     FMinerOperations.Lock;
     Try
       tree := TOperationsHashTree.Create;
       try
-        if (Not (TPCOperationsComp.EqualsOperationBlock(FMinerOperations.OperationBlock,MasterOp.OperationBlock))) then begin
+        if (Not (TPCOperationsComp.EqualsOperationBlock(FMinerOperations.OperationBlock,LLockedMempool.OperationBlock))) then begin
           FMinerOperations.Clear(true);
-          if MasterOp.Count>0 then begin
+          if LLockedMempool.Count>0 then begin
             // First round: Select with fee > 0
             i := 0;
-            while (tree.OperationsCount<MaxOperationsPerBlock) And (i<MasterOp.OperationsHashTree.OperationsCount) do begin
-              op := MasterOp.OperationsHashTree.GetOperation(i);
+            while (tree.OperationsCount<MaxOperationsPerBlock) And (i<LLockedMempool.OperationsHashTree.OperationsCount) do begin
+              op := LLockedMempool.OperationsHashTree.GetOperation(i);
               if op.OperationFee>0 then begin
                 DoAdd(op,false);
               end;
@@ -732,8 +814,8 @@ begin
             // Second round: Allow fee = 0
             j := 0;
             i := 0;
-            while (tree.OperationsCount<MaxOperationsPerBlock) And (i<MasterOp.OperationsHashTree.OperationsCount) And (j<Max0FeeOperationsPerBlock) do begin
-              op := MasterOp.OperationsHashTree.GetOperation(i);
+            while (tree.OperationsCount<MaxOperationsPerBlock) And (i<LLockedMempool.OperationsHashTree.OperationsCount) And (j<Max0FeeOperationsPerBlock) do begin
+              op := LLockedMempool.OperationsHashTree.GetOperation(i);
               if op.OperationFee=0 then begin
                 DoAdd(op,True);
                 inc(j);
@@ -742,16 +824,16 @@ begin
             end;
             // Add operations:
             i := FMinerOperations.AddOperations(tree,errors);
-            if (i<>tree.OperationsCount) Or (i<>MasterOp.OperationsHashTree.OperationsCount) then begin
+            if (i<>tree.OperationsCount) Or (i<>LLockedMempool.OperationsHashTree.OperationsCount) then begin
               TLog.NewLog(ltDebug,ClassName,Format('Cannot add all operations! Master:%d Selected:%d Added:%d - Errors: %s',
-                [MasterOp.OperationsHashTree.OperationsCount,tree.OperationsCount,i,errors]));
+                [LLockedMempool.OperationsHashTree.OperationsCount,tree.OperationsCount,i,errors]));
             end;
           end else begin
-            FMinerOperations.CopyFrom(MasterOp);
+            FMinerOperations.CopyFrom(LLockedMempool);
           end;
           //
-          TLog.NewLog(ltInfo,ClassName,Format('New miner operations:%d Hash:%s %s',
-            [FMinerOperations.OperationsHashTree.OperationsCount,TCrypto.ToHexaString(FMinerOperations.OperationsHashTree.HashTree),TCrypto.ToHexaString(FMinerOperations.OperationBlock.operations_hash)]));
+          {$IFDEF HIGHLOG}TLog.NewLog(ltdebug,ClassName,Format('New miner operations:%d Hash:%s %s',
+            [FMinerOperations.OperationsHashTree.OperationsCount,TCrypto.ToHexaString(FMinerOperations.OperationsHashTree.HashTree),TCrypto.ToHexaString(FMinerOperations.OperationBlock.operations_hash)]));{$ENDIF}
         end else begin
           TLog.NewLog(ltDebug,ClassName,Format('No need to change Miner buffer. Operations:%d',[FMinerOperations.OperationsHashTree.OperationsCount]));
         end;
@@ -762,21 +844,21 @@ begin
       FMinerOperations.Unlock;
     end;
   Finally
-    MasterOp.Unlock;
+    FNodeNotifyEvents.Node.UnlockMempoolRead;
   End;
 end;
 
 function TPoolMiningServer.MinerSubmit(Client: TJSONRPCTcpIpClient; params: TPCJSONObject; const id : Variant): Boolean;
 Var s : String;
   nbOperations : TPCOperationsComp;
-  errors, sJobInfo : AnsiString;
-  nba : TBlockAccount;
+  errors, sJobInfo : String;
   json : TPCJSONObject;
   p1,p2,p3 : TRawBytes;
   P : PPoolJob;
   i : Integer;
-  l : TList;
-  _payloadHexa,_payload : AnsiString;
+  l : TList<Pointer>;
+  _payloadHexa : AnsiString;
+  _payloadRaw : TRawBytes;
   _timestamp, _nOnce : Cardinal;
   _targetPoW : TRawBytes;
 begin
@@ -795,11 +877,10 @@ begin
   nbOperations := Nil;
   Try
     _payloadHexa := params.AsString('payload','');
-    _payload := TCrypto.HexaToRaw(_payloadHexa);
-    if FMinerPayload<>'' then begin
-      if (copy(_payload,1,length(FMinerPayload))<>FMinerPayload) then begin
-        if _payload='' then _payload := _payloadHexa;
-        Client.SendJSONRPCErrorResponse(id,'Invalid payload ('+_payload+'). Need start with: '+FMinerPayload);
+    _payloadRaw := TCrypto.HexaToRaw(_payloadHexa);
+    if Length(FMinerPayload)>0 then begin
+      if (Not TBaseType.Equals(copy(_payloadRaw,Low(_payloadRaw),length(FMinerPayload)),FMinerPayload)) then begin
+        Client.SendJSONRPCErrorResponse(id,'Invalid payload ('+_payloadHexa+'). Need start with: '+TCrypto.ToHexaString(FMinerPayload));
         exit;
       end;
     end;
@@ -813,9 +894,11 @@ begin
         P := l[i];
         // Best practices: Only will accept a solution if timestamp >= sent timestamp for this job (1.5.3)
         If (P^.SentMinTimestamp<=_timestamp) then begin
-          _targetPoW := FNodeNotifyEvents.Node.Bank.SafeBox.GetActualTargetHash(P^.OperationsComp.OperationBlock.protocol_version);
-          P^.OperationsComp.Update_And_RecalcPOW(_nOnce,_timestamp,_payload);
-          if (P^.OperationsComp.OperationBlock.proof_of_work<=_targetPoW) then begin
+
+          _targetPow := TPascalCoinProtocol.TargetFromCompact( P^.OperationsComp.OperationBlock.compact_target, P^.OperationsComp.OperationBlock.protocol_version );
+
+          P^.OperationsComp.Update_And_RecalcPOW(_nOnce,_timestamp,_payloadRaw);
+          if (TBaseType.BinStrComp(P^.OperationsComp.OperationBlock.proof_of_work,_targetPoW)<=0) then begin
             // Candidate!
             nbOperations := TPCOperationsComp.Create(Nil);
             nbOperations.bank := FNodeNotifyEvents.Node.Bank;
@@ -824,20 +907,22 @@ begin
             TLog.NewLog(ltInfo,ClassName,sJobInfo+' - Found a solution for block '+IntToStr(nbOperations.OperationBlock.block));
           end else TLog.NewLog(lterror,ClassName,sJobInfo+Format(' Calculated Pow > Min PoW ->  %s > %s',
             [TCrypto.ToHexaString(P^.OperationsComp.OperationBlock.proof_of_work),TCrypto.ToHexaString(_targetPoW)]));
-        end else TLog.NewLog(lterror,ClassName,sJobInfo+Format(' Timestamp %d < MinTimestamp %d',[_timestamp,P^.SentMinTimestamp]));
+        end else begin
+          TLog.NewLog(lterror,ClassName,sJobInfo+Format(' Timestamp %d < MinTimestamp %d',[_timestamp,P^.SentMinTimestamp]));
+        end;
         dec(i);
       end;
     Finally
       FPoolJobs.UnlockList;
     End;
     if Assigned(nbOperations) then begin
-      If FNodeNotifyEvents.Node.AddNewBlockChain(nil,nbOperations,nba,errors) then begin
+      If FNodeNotifyEvents.Node.AddNewBlockChain(nil,nbOperations,errors) then begin
         // CONGRATS !!!
         json := TPCJSONObject.Create;
         try
           json.GetAsVariant('block').Value := FNodeNotifyEvents.Node.Bank.LastOperationBlock.block;
           json.GetAsVariant('pow').Value := TCrypto.ToHexaString( FNodeNotifyEvents.Node.Bank.LastOperationBlock.proof_of_work );
-          json.GetAsVariant('payload').Value := nbOperations.BlockPayload;
+          json.GetAsVariant('payload').Value := nbOperations.BlockPayload.ToString;
           json.GetAsVariant('timestamp').Value := nbOperations.timestamp;
           json.GetAsVariant('nonce').Value := nbOperations.nonce;
           inc(FClientsWins);
@@ -847,10 +932,10 @@ begin
         end;
         if Assigned(FOnMiningServerNewBlockFound) then FOnMiningServerNewBlockFound(Self);
       end else begin
-        Client.SendJSONRPCErrorResponse(id,'Error: '+errors+' executing '+sJobInfo+' payload:'+nbOperations.BlockPayload+' timestamp:'+InttoStr(nbOperations.timestamp)+' nonce:'+IntToStr(nbOperations.nonce));
+        Client.SendJSONRPCErrorResponse(id,'Error: '+errors+' executing '+sJobInfo+' payload:'+TCrypto.ToHexaString(nbOperations.BlockPayload)+' timestamp:'+InttoStr(nbOperations.timestamp)+' nonce:'+IntToStr(nbOperations.nonce));
       end;
     end else begin
-      Client.SendJSONRPCErrorResponse(id,'Error: No valid job found with these values! (Perhaps prior block job or old job) payload:'+_payload+' timestamp:'+InttoStr(_timestamp)+' nonce:'+IntToStr(_nonce));
+      Client.SendJSONRPCErrorResponse(id,'Error: No valid job found with these values! (Perhaps prior block job or old job) payload:'+_payloadHexa+' timestamp:'+InttoStr(_timestamp)+' nonce:'+IntToStr(_nonce));
     end;
   Finally
     if Assigned(nbOperations) then nbOperations.Free;
@@ -905,7 +990,7 @@ var params : TPCJSONObject;
   ts : Cardinal;
 Var P : PPoolJob;
   i,nJobs : Integer;
-  l : TList;
+  l : TList<Pointer>;
 begin
   if FClientsCount<=0 then exit;
   if (Not Assigned(Operations)) then begin
@@ -914,12 +999,12 @@ begin
     Try
       if l.count>0 then P := l[l.Count-1] // The last
       else begin
-        TLog.NewLog(ltInfo,ClassName,'Creating new job for miner');
+        //TLog.NewLog(ltInfo,ClassName,'Creating new job for miner');
         New(P);
         P^.SentDateTime := now;
         P^.SentMinTimestamp := TNetData.NetData.NetworkAdjustedTime.GetAdjustedTime;
-        if (P^.SentMinTimestamp<FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.timestamp) then begin
-          P^.SentMinTimestamp := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.timestamp;
+        if (P^.SentMinTimestamp<FNodeNotifyEvents.Node.Bank.LastOperationBlock.timestamp) then begin
+          P^.SentMinTimestamp := FNodeNotifyEvents.Node.Bank.LastOperationBlock.timestamp;
         end;
         FillMinerOperations;
         P^.OperationsComp := TPCOperationsComp.Create(Nil);
@@ -927,8 +1012,8 @@ begin
         P^.OperationsComp.AccountKey := FMinerAccountKey;
         P^.OperationsComp.BlockPayload := FMinerPayload;
         P^.OperationsComp.timestamp := P^.SentMinTimestamp; // Best practices 1.5.3
-        if (P^.OperationsComp.OperationBlock.block<>0) And (P^.OperationsComp.OperationBlock.block <> (FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.block+1)) then begin
-          TLog.NewLog(ltError,ClassName,'ERROR DEV 20170228-2 '+TPCOperationsComp.OperationBlockToText(P^.OperationsComp.OperationBlock)+'<>'+TPCOperationsComp.OperationBlockToText(FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock));
+        if (P^.OperationsComp.OperationBlock.block<>0) And (P^.OperationsComp.OperationBlock.block <> (FNodeNotifyEvents.Node.Bank.LastOperationBlock.block+1)) then begin
+          TLog.NewLog(ltError,ClassName,'ERROR DEV 20170228-2 '+TPCOperationsComp.OperationBlockToText(P^.OperationsComp.OperationBlock)+'<>'+TPCOperationsComp.OperationBlockToText(FNodeNotifyEvents.Node.Bank.LastOperationBlock));
           P^.OperationsComp.Free;
           Dispose(P);
           raise Exception.Create('ERROR DEV 20170228-2');
@@ -956,11 +1041,11 @@ begin
     params.GetAsVariant('payload_start').Value := TCrypto.ToHexaString( Operations.OperationBlock.block_payload );
     params.GetAsVariant('part3').Value := TCrypto.ToHexaString( Operations.PoW_Digest_Part3 );
     params.GetAsVariant('target').Value := Operations.OperationBlock.compact_target;
-    params.GetAsVariant('target_pow').Value := TCrypto.ToHexaString(TPascalCoinProtocol.TargetFromCompact(Operations.OperationBlock.compact_target));
+    params.GetAsVariant('target_pow').Value := TCrypto.ToHexaString(TPascalCoinProtocol.TargetFromCompact(Operations.OperationBlock.compact_target,Operations.OperationBlock.protocol_version));
 
     ts := TNetData.NetData.NetworkAdjustedTime.GetAdjustedTime;
-    if (ts<FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.timestamp) then begin
-      ts := FNodeNotifyEvents.Node.Bank.LastBlockFound.OperationBlock.timestamp;
+    if (ts<FNodeNotifyEvents.Node.Bank.LastOperationBlock.timestamp) then begin
+      ts := FNodeNotifyEvents.Node.Bank.LastOperationBlock.timestamp;
     end;
     params.GetAsVariant('timestamp').Value := ts;
 
@@ -970,9 +1055,9 @@ begin
       Client.SendJSONRPCMethod(CT_PoolMining_Method_MINER_NOTIFY,params,Null);
     end;
 
-    TLog.NewLog(ltInfo,ClassName,
+    TLog.NewLog(ltdebug,ClassName,
       Format('Sending job %d to miner - Block:%d Ops:%d Target:%s PayloadStart:%s',
-      [nJobs,Operations.OperationBlock.block,Operations.Count,IntToHex(Operations.OperationBlock.compact_target,8),Operations.OperationBlock.block_payload]));
+      [nJobs,Operations.OperationBlock.block,Operations.Count,IntToHex(Operations.OperationBlock.compact_target,8),Operations.OperationBlock.block_payload.ToPrintable]));
   Finally
     params.Free;
   End;
@@ -1041,11 +1126,13 @@ end;
 constructor TPoolMinerClient.Create(AOwner: TComponent);
 begin
   FMinerValuesForWork := CT_TMinerValuesForWork_NULL;
-  FPoolType:=ptNone;
+  FPoolType:=ptSolomine;
   FUserName:='';
   FPassword:='';
-  FPoolFinalMinerName:='';
-  FStratum_Target_PoW:='';
+  FPoolFinalMinerName:=Nil;
+  FStratum_Target_PoW:=Nil;
+  FStratumAuthorized := False;
+  FStratum_ExtraNOnce2_Size := 0;
   inherited;
 end;
 
@@ -1057,44 +1144,24 @@ Var params : TPCJSONArray;
   i : Integer;
 begin
   inherited DoOnConnect;
-  If FPoolType=ptIdentify then begin
+  If FPoolType=ptPoolSubscription then begin
     // Pool initialization
     params := TPCJSONArray.Create;
     resultObject := TPCJSONObject.Create;
     try
-      params.GetAsVariant(0).Value:=UserName;
-      params.GetAsVariant(1).Value:=Password;
-      If SendJSONRPCMethodAndWait(CT_PoolMining_Method_STRATUM_MINING_AUTHORIZE,params,1000,resultObject,nil) then begin
-        TLog.NewLog(ltInfo,Classname,CT_PoolMining_Method_STRATUM_MINING_AUTHORIZE+' response: '+resultObject.ToJSON(false));
-        // Now subscribe
-        params.Clear;
-        resultObject.Clear;
-        If SendJSONRPCMethodAndWait(CT_PoolMining_Method_STRATUM_MINING_SUBSCRIBE,params,1000,resultObject,nil) then begin
-          //
-          TLog.NewLog(ltInfo,Classname,CT_PoolMining_Method_STRATUM_MINING_SUBSCRIBE+' response: '+resultObject.ToJSON(false));
-          // Decode response
-          If (resultObject.IsNull('error')) then begin
-            s := resultObject.GetAsArray('result').GetAsArray(0).GetAsArray(0).GetAsVariant(0).AsString('');
-            if (s<>'mining.nonce') then Raise Exception.Create('Not a mining.nonce');
-            s := resultObject.GetAsArray('result').GetAsVariant(1).AsString('');
-            raws := TCrypto.HexaToRaw(s);
-            If (length(s)>0) And (length(raws)=0) then begin
-              TLog.NewLog(lterror,ClassName,'Invalid value to assign as a Miner name. Not hexadecimal '+s);
-              FPoolFinalMinerName:='';
-            end else begin
-              FPoolFinalMinerName := raws;
-              for i:=1 to length(raws) do begin
-                if Not (raws[i] in [#32..#254]) then begin
-                  TLog.NewLog(ltError,ClassName,'Invalid proposed miner name. Value at pos '+inttostr(i)+' is not #32..#254: '+IntToStr(integer(raws[i])));
-                  FPoolFinalMinerName:='';
-                  break;
-                end;
-              end;
-            end;
-            TLog.NewLog(ltInfo,Classname,'Final miner name: "'+FPoolFinalMinerName+'" (Length '+IntToStr(length(FPoolFinalMinerName)));
-          end;
-        end else raise Exception.Create('Not response to "'+CT_PoolMining_Method_STRATUM_MINING_SUBSCRIBE+'" method for user "'+UserName+'"');
-      end else raise Exception.Create('Not response to "'+CT_PoolMining_Method_STRATUM_MINING_AUTHORIZE+'" method for user "'+UserName+'"');
+      If SendJSONRPCMethodAndWait(CT_PoolMining_Method_STRATUM_MINING_SUBSCRIBE,params,8000,resultObject,DoProcessJSONObject) then begin
+        //
+        DoProcessJSONObject(resultObject,CT_PoolMining_Method_STRATUM_MINING_SUBSCRIBE);
+        //
+        Sleep(100);
+        //
+        params.GetAsVariant(0).Value:=UserName;
+        params.GetAsVariant(1).Value:=Password;
+        If SendJSONRPCMethodAndWait(CT_PoolMining_Method_STRATUM_MINING_AUTHORIZE,params,8000,resultObject,DoProcessJSONObject) then begin
+          DoProcessJSONObject(resultObject,CT_PoolMining_Method_STRATUM_MINING_AUTHORIZE);
+          FStratumAuthorized := True;
+        end else raise Exception.Create('Not response to "'+CT_PoolMining_Method_STRATUM_MINING_AUTHORIZE+'" method for user "'+UserName+'"');
+      end else raise Exception.Create('Not response to "'+CT_PoolMining_Method_STRATUM_MINING_SUBSCRIBE+'" method for user "'+UserName+'"');
     finally
       resultObject.free;
       params.free;
@@ -1111,8 +1178,105 @@ Var method : String;
   params : TPCJSONData;
   mvfw : TMinerValuesForWork;
   prev_pow,proposed_pow : TRawBytes;
+
+  procedure StratumUpdatedDifficulty(ANewDifficultyValue : Double);
+  var LBigNumDiff : TBigNum;
+    LAuxPOW : TRawBytes;
+    LHexa : String;
+  begin
+    LBigNumDiff := TBigNum.Create('00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
+    try
+      if (ANewDifficultyValue<=0) then Exit;
+
+      if (ANewDifficultyValue<1) then begin
+        LBigNumDiff.Multiply( Round(1000.0/ANewDifficultyValue) ).Divide( 1000 );
+      end else begin
+        LBigNumDiff.Multiply( Round(ANewDifficultyValue*1000.0) ).Divide( 1000 );
+      end;
+      LHexa := LBigNumDiff.HexaValue;
+    finally
+      LBigNumDiff.Free;
+    end;
+    while (LHexa.Length<64) do LHexa.Insert(0,'0');
+    TCrypto.HexaToRaw( LHexa, LAuxPOW );
+    if TBaseType.Equals(LAuxPOW,FStratum_Target_PoW) then Exit; // Nothing to update
+
+    FStratum_Target_PoW := LAuxPOW;
+    TLog.NewLog(ltInfo,ClassName,Format('Set Difficulty to %.6f -> Target PoW:%s %s',[ANewDifficultyValue,
+      TPascalCoinProtocol.TargetToCompact(FStratum_Target_PoW,CT_PROTOCOL_4).ToHexString,
+      FStratum_Target_PoW.ToHexaString]));
+  end;
+
+  procedure ExtractStratumMinerValuesFromWork(const AJobID, ADigestPart_1, ADigestPart_2, AStratumTime : String);
+  var LMVFW : TMinerValuesForWork;
+    LStream : TStream;
+    LRaw : TRawBytes;
+  begin
+    LMVFW := CT_TMinerValuesForWork_NULL;
+    // Extracting Miner Values From Work from Digest parts:
+    if Not TCrypto.HexaToRaw( ADigestPart_1, LRaw) then begin
+      TLog.NewLog(ltError,ClassName,Format('Digest Part 1 obtained is not Hexadecimal: "%s" length %d',[ADigestPart_1,Length(ADigestPart_1)]));
+      Exit;
+    end;
+    if (Length(LRaw)<20) then begin
+      TLog.NewLog(ltError,ClassName,Format('Digest Part 1 is too short: "%s" length %d',[ADigestPart_1,Length(ADigestPart_1)]));
+      Exit;
+    end;
+    LMVFW.part1 := LRaw;
+    if Not TCrypto.HexaToRaw(ADigestPart_2,LMVFW.part3) then begin
+      TLog.NewLog(ltError,ClassName,Format('Digest Part 2 obtained is not Hexadecimal: "%s" length %d',[ADigestPart_2,Length(ADigestPart_2)]));
+      Exit;
+    end;
+    LStream := TMemoryStream.Create;
+    try
+      LStream.WriteBuffer( LRaw[0], Length(LRaw) );
+      LStream.Position := 0;
+      // Block number is stored as a Little Endian on first 4 bytes (8 hexa chars)
+      LStream.Read(LMVFW.block,4);
+
+      if LMVFW.block=0 then Exit;
+
+      // Latest 8 bytes are:
+      // 2 - protocol_version
+      // 2 - protocol_available
+      // 4 - target
+      LStream.Seek(-8,soFromEnd);
+      LStream.Read(LMVFW.version,2);
+      LStream.Seek(2,soFromCurrent);
+      LStream.Read(LMVFW.target,4);
+      LMVFW.jobid := AJobID;
+    finally
+      LStream.Free;
+    end;
+    // Capture timestamp
+    LMVFW.timestamp := StrToIntDef('$'+AStratumTime,0);
+    //
+    MinerValuesForWork := LMVFW;
+  end;
+
+  procedure ExtractStratumMinerValuesFromWorkFromParams;
+  var i : Integer;
+  begin
+    if Not Assigned(params_as_array) then Exit;
+    i := params_as_array.Count - 9;
+    if (i<0) or (i>1) then Exit;
+
+    if (i=1) then begin
+      // Extract difficulty from position 0
+      StratumUpdatedDifficulty( params_as_array.GetAsVariant(0).AsDouble(1) );
+    end;
+
+    // STRATUM
+    ExtractStratumMinerValuesFromWork(
+      params_as_array.GetAsVariant(0 + i).AsString(''),
+      params_as_array.GetAsVariant(2 + i).AsString(''),
+      params_as_array.GetAsVariant(3 + i).AsString(''),
+      params_as_array.GetAsVariant(7 + i).AsString('')
+    );
+  end;
+
+
 begin
-  TLog.NewLog(ltInfo,ClassName,'Received JSON: '+json.ToJSON(false));
   params := Nil;
   params_as_object := Nil;
   params_as_array := Nil;
@@ -1122,19 +1286,20 @@ begin
     if (i>=0) then begin
       params := json.Items[i];
     end;
-    TLog.NewLog(ltinfo,classname,'Received response method:'+ResponseMethod+' JSON:'+json.ToJSON(false));
+    {$IFDEF HIGHLOG}TLog.NewLog(ltinfo,classname,'Received response method:'+ResponseMethod+' JSON:'+json.ToJSON(false));{$ENDIF}
   end else begin
     method := json.AsString('method','');
-    i := json.IndexOfName('params');
-    if (i>=0) then begin
-      params := json.Items[i];
-    end;
+  end;
+  i := json.IndexOfName('params');
+  if (i>=0) then begin
+    params := json.Items[i];
   end;
   If Assigned(params) then begin
     if (params is TPCJSONNameValue) then begin
       if (TPCJSONNameValue(params).Value is TPCJSONObject) then params_as_object := TPCJSONObject(TPCJSONNameValue(params).Value)
       else if (TPCJSONNameValue(params).Value is TPCJSONArray) then params_as_array := TPCJSONArray(TPCJSONNameValue(params).Value);
-    end;
+    end else if (params is TPCJSONArray) then params_as_array := TPCJSONArray(params)
+    else if (params is TPCJSONObject) then params_as_object := TPCJSONObject(params)
   end;
   i := json.IndexOfName('id');
   if i<0 then begin
@@ -1156,7 +1321,7 @@ begin
       mvfw.timestamp := pobject.AsInteger('timestamp',0);
       mvfw.part1 := TCrypto.HexaToRaw(pobject.AsString('part1',''));
       mvfw.target_pow := TCrypto.HexaToRaw(pobject.AsString('target_pow',''));
-      If FPoolType=ptIdentify then begin
+      If FPoolType=ptPoolSubscription then begin
         mvfw.jobid:=pobject.AsString('jobid','');
       end;
       if (Not VarIsNull(id_value)) And (ResponseMethod='') then begin
@@ -1164,6 +1329,40 @@ begin
       end;
       MinerValuesForWork := mvfw;
     end else TLog.NewLog(ltError,ClassName,'method '+method+' without JSON object '+params.ToJSON(false));
+  end else if (method=CT_PoolMining_Method_MINER_SUBMIT) then begin
+    //
+  end else if (method=CT_PoolMining_Method_STRATUM_MINING_AUTHORIZE) And
+    (PoolType=ptPoolSubscription) And (Assigned(params_as_array)) then begin
+    //
+    FStratumAuthorized := True;
+    ExtractStratumMinerValuesFromWorkFromParams;
+  end else if (method=CT_PoolMining_Method_STRATUM_MINING_SUBSCRIBE) And
+    (PoolType=ptPoolSubscription) And (Assigned(params_as_array)) then begin
+    // STRATUM
+    // {"id":2,"result":[[["mining.notify","00000000000000000000000000000000"]],"303030303030303030",8],"error":null}
+    // Explained at: https://slushpool.com/help/stratum-protocol/
+    // params[0] -> Subscription details
+    // params[1] -> Extranonce1
+    // params[2] -> Extranonce2_size
+    FPoolFinalMinerName := TCrypto.HexaToRaw( params_as_array.GetAsVariant(1).AsString('') );
+    FStratum_ExtraNOnce2_Size := params_as_array.GetAsVariant(2).AsInteger(0);
+  end else if (method=CT_PoolMining_Method_STRATUM_MINING_SET_DIFFICULTY) And
+    (PoolType=ptPoolSubscription) And (Assigned(params_as_array)) then begin
+    // STRATUM
+    // {"id":null,"method":"mining.set_difficulty","params":[0.0000152588]}
+    StratumUpdatedDifficulty( params_as_array.GetAsVariant(0).AsDouble(1) );
+
+  end else if (method=CT_PoolMining_Method_STRATUM_MINING_NOTIFY) And
+    (PoolType=ptPoolSubscription) And (Assigned(params_as_array)) then begin
+    ExtractStratumMinerValuesFromWorkFromParams;
+  end else if (method=CT_PoolMining_Method_STRATUM_MINING_SUBMIT) And
+    (PoolType=ptPoolSubscription) then begin
+    // Response to a mining submit event
+    if (json.GetAsVariant('error').AsBoolean(False)) then begin
+      TLog.NewLog(lterror,ClassName,Format('Invalid SHARE %s',[method,json.ToJSON(False)]));
+    end;
+  end else begin
+    TLog.NewLog(lterror,ClassName,Format('Unknown method received "%s": %s',[method,json.ToJSON(False)]));
   end;
 end;
 
@@ -1172,29 +1371,29 @@ Var _t : Cardinal;
   _t_pow : TRawBytes;
 begin
   FMinerValuesForWork := Value;
-  If FStratum_Target_PoW<>'' then begin
-    FMinerValuesForWork.target:=TPascalCoinProtocol.TargetToCompact(FStratum_Target_PoW);
-    FMinerValuesForWork.target_pow:=TPascalCoinProtocol.TargetFromCompact(FMinerValuesForWork.target);
+  If Length(FStratum_Target_PoW)>0 then begin
+    FMinerValuesForWork.target:=TPascalCoinProtocol.TargetToCompact(FStratum_Target_PoW,FMinerValuesForWork.version);
+    FMinerValuesForWork.target_pow:=TPascalCoinProtocol.TargetFromCompact(FMinerValuesForWork.target,FMinerValuesForWork.version);
   end else begin
     // Check that target and target_pow are equal!
-    _t_pow := TPascalCoinProtocol.TargetFromCompact(FMinerValuesForWork.target);
+    _t_pow := TPascalCoinProtocol.TargetFromCompact(FMinerValuesForWork.target,FMinerValuesForWork.version);
     if (length(FMinerValuesForWork.target_pow)=32) then begin
-      _t := TPascalCoinProtocol.TargetToCompact(FMinerValuesForWork.target_pow);
-      if (FMinerValuesForWork.target<CT_MinCompactTarget) then begin
+      _t := TPascalCoinProtocol.TargetToCompact(FMinerValuesForWork.target_pow,FMinerValuesForWork.version);
+      if (FMinerValuesForWork.target<TPascalCoinProtocol.MinimumTarget(FMinerValuesForWork.version)) then begin
         // target has no valid value... assigning compact_target!
-        FMinerValuesForWork.target:=TPascalCoinProtocol.TargetToCompact(_t_pow);
-      end else if (_t_pow<>FMinerValuesForWork.target_pow) Or (_t<>FMinerValuesForWork.target) then begin
+        FMinerValuesForWork.target:=TPascalCoinProtocol.TargetToCompact(_t_pow,FMinerValuesForWork.version);
+      end else if (Not TBaseType.Equals(_t_pow,FMinerValuesForWork.target_pow)) Or (_t<>FMinerValuesForWork.target) then begin
         TLog.NewLog(ltError,Classname,'Received bad values for target and target_pow!');
-        If (FMinerValuesForWork.target<CT_MinCompactTarget) then begin
-          FMinerValuesForWork.target_pow:=TPascalCoinProtocol.TargetFromCompact(FMinerValuesForWork.target);
+        If (FMinerValuesForWork.target<TPascalCoinProtocol.MinimumTarget(FMinerValuesForWork.version)) then begin
+          FMinerValuesForWork.target_pow:=TPascalCoinProtocol.TargetFromCompact(FMinerValuesForWork.target,FMinerValuesForWork.version);
         end else begin
-          FMinerValuesForWork.target:=TPascalCoinProtocol.TargetToCompact(_t_pow);
+          FMinerValuesForWork.target:=TPascalCoinProtocol.TargetToCompact(_t_pow,FMinerValuesForWork.version);
         end;
       end;
     end else begin
-      if (FMinerValuesForWork.target<CT_MinCompactTarget) then begin
+      if (FMinerValuesForWork.target>=TPascalCoinProtocol.MinimumTarget(FMinerValuesForWork.version)) then begin
         // target_pow has no value... assigning target!
-        FMinerValuesForWork.target_pow:=TPascalCoinProtocol.TargetFromCompact(FMinerValuesForWork.target);
+        FMinerValuesForWork.target_pow:=TPascalCoinProtocol.TargetFromCompact(FMinerValuesForWork.target,FMinerValuesForWork.version);
       end else begin
         // Invalid target and compact_target
         FMinerValuesForWork.target := CT_TMinerValuesForWork_NULL.target;
@@ -1202,32 +1401,60 @@ begin
       end;
     end;
   end;
-  If (FPoolType=ptIdentify) And (FPoolFinalMinerName<>'') then FMinerValuesForWork.payload_start:=FPoolFinalMinerName;
+  If (FPoolType=ptPoolSubscription) And (Length(FPoolFinalMinerName)>0) then begin
+    FMinerValuesForWork.payload_start:=FPoolFinalMinerName;
+    FMinerValuesForWork.extraNOnce2_Size:=FStratum_ExtraNOnce2_Size;
+    FMinerValuesForWork.extraNOnce2_Used:=Nil;
+  end;
   if Assigned(FOnMinerMustChangeValues) then FOnMinerMustChangeValues(Self);
 end;
 
-procedure TPoolMinerClient.SubmitBlockFound(Const MinerValuesToGenerateBlock : TMinerValuesForWork; const Payload: TRawBytes; Timestamp, NOnce: Cardinal);
-Var json, resultJSON : TPCJSONObject;
-  nOnceAsSignedInt : Int32;
+procedure TPoolMinerClient.SubmitBlockFound(Const MinerValuesToGenerateBlock : TMinerValuesForWork; const Payload: TRawBytes; Timestamp, NOnce: Cardinal; const AObtainedPoW : TRawBytes);
+Var json : TPCJSONObject;
+  LnOnceAsSignedInt : Int32;
+  LArrJSON : TPCJSONArray;
 begin
-  json := TPCJSONObject.Create;
-  Try
-    nOnceAsSignedInt := NOnce;
-    If FPoolType=ptIdentify then begin
-      json.GetAsVariant('jobid').Value := MinerValuesToGenerateBlock.jobid;
-    end;
-    json.GetAsVariant('payload').Value := TCrypto.ToHexaString(Payload);
-    json.GetAsVariant('timestamp').Value := Timestamp;
-    json.GetAsVariant('nonce').Value := nOnceAsSignedInt;
-    resultJSON := TPCJSONObject.Create;
-    try
-      SendJSONRPCMethod(CT_PoolMining_Method_MINER_SUBMIT,json,GetNewId);
+  LnOnceAsSignedInt := NOnce;
+  If FPoolType=ptPoolSubscription then begin
+    LArrJSON := TPCJSONArray.Create;
+    Try
+      LArrJSON.GetAsVariant(0).Value := UserName;
+      LArrJSON.GetAsVariant(1).Value := MinerValuesToGenerateBlock.jobid;
+      LArrJSON.GetAsVariant(2).Value := MinerValuesToGenerateBlock.extraNOnce2_Used.ToHexaString; //  Payload.ToHexaString;// + '1234567812345678'; // '1234567812345678'; //Payload.ToHexaString;
+      LArrJSON.GetAsVariant(3).Value := IntToHex(Timestamp,8);
+      LArrJSON.GetAsVariant(4).Value := IntToHex(LnOnceAsSignedInt,8);
+      SendJSONRPCMethod(CT_PoolMining_Method_STRATUM_MINING_SUBMIT,LArrJSON,GetNewId);
+      TLog.NewLog(ltInfo,ClassName,Format('SHARE for job %s block %d Time %s NOnce %s ExtraNOnce2 %s PoW %s',
+       [MinerValuesToGenerateBlock.jobid,
+        MinerValuesToGenerateBlock.block,
+        IntToHex(Timestamp,8),
+        IntToHex(LnOnceAsSignedInt,8),
+        MinerValuesToGenerateBlock.extraNOnce2_Used.ToHexaString,
+        AObtainedPoW.ToHexaString]));
     Finally
-      resultJSON.free;
-    end;
-  Finally
-    json.Free;
-  End;
+      LArrJSON.Free;
+    End;
+  end else begin
+    json := TPCJSONObject.Create;
+    Try
+      If FPoolType=ptPoolSubscription then begin
+        json.GetAsVariant('jobid').Value := MinerValuesToGenerateBlock.jobid;
+      end;
+      json.GetAsVariant('payload').Value := TCrypto.ToHexaString(Payload);
+      json.GetAsVariant('timestamp').Value := Timestamp;
+      json.GetAsVariant('nonce').Value := LnOnceAsSignedInt;
+      SendJSONRPCMethod(CT_PoolMining_Method_MINER_SUBMIT,json,GetNewId);
+      TLog.NewLog(ltInfo,ClassName,Format('FOUND SOLUTION for block %d Time %s NOnce %s Payload %s PoW %s',
+       [
+        MinerValuesToGenerateBlock.block,
+        IntToHex(Timestamp,8),
+        IntToHex(LnOnceAsSignedInt,8),
+        Payload.ToHexaString,
+        AObtainedPoW.ToHexaString]));
+    Finally
+      json.Free;
+    End;
+  end;
 end;
 
 { TPoolMiningServerThread }

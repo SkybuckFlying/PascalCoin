@@ -1,26 +1,31 @@
 unit UTxMultiOperation;
 
-{$IFDEF FPC}
-  {$mode delphi}
-{$ENDIF}
-
-{ Copyright (c) 2018 by Albert Molina - PascalCoin developers
+{ Copyright (c) 2018 by Albert Molina
 
   Distributed under the MIT software license, see the accompanying file LICENSE
   or visit http://www.opensource.org/licenses/mit-license.php.
 
-  This unit is a part of Pascal Coin, a P2P crypto currency without need of
-  historical operations.
+  This unit is a part of the PascalCoin Project, an infinitely scalable
+  cryptocurrency. Find us here:
+  Web: https://www.pascalcoin.org
+  Source: https://github.com/PascalCoin/PascalCoin
 
-  If you like it, consider a donation using BitCoin:
+  If you like it, consider a donation using Bitcoin:
   16K3HCZRhFUtM8GdWRcfKeaa6KsuyxZaYk
 
-  }
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
+
+{$IFDEF FPC}
+  {$mode delphi}
+{$ENDIF}
 
 interface
 
 uses
-  Classes, SysUtils, UCrypto, UBlockChain, UAccounts;
+  Classes, SysUtils, UCrypto, UBlockChain, UAccounts, UBaseTypes,
+  {$IFNDEF FPC}System.Generics.Collections{$ELSE}Generics.Collections{$ENDIF},
+  UPCDataTypes;
 
 Type
 
@@ -97,32 +102,35 @@ Type
   private
     FData : TOpMultiOperationData;
     //
+    FtxSendersPubkeysUsedForSign : array of TAccountKey;
+    FchangesInfoPubkeysUsedForSign : array of TAccountKey;
+    //
     FSaveSignatureValue : Boolean;
     FTotalAmount : Int64;
     FTotalFee : Int64;
-    Function IndexOfAccountChangeNameTo(const newName : AnsiString) : Integer;
+    Function IndexOfAccountChangeNameTo(const newName : TRawBytes) : Integer;
     procedure ClearSignatures;
   protected
-    procedure InitializeData; override;
+    procedure InitializeData(AProtocolVersion : Word); override;
     function SaveOpToStream(Stream: TStream; SaveExtendedData : Boolean): Boolean; override;
     function LoadOpFromStream(Stream: TStream; LoadExtendedData : Boolean): Boolean; override;
     procedure FillOperationResume(Block : Cardinal; getInfoForAllAccounts : Boolean; Affected_account_number : Cardinal; var OperationResume : TOperationResume); override;
+    procedure CopyUsedPubkeySignatureFrom(SourceOperation : TPCOperation); override;
   public
     function GetBufferForOpHash(UseProtocolV2 : Boolean): TRawBytes; override;
 
-    function CheckSignatures(AccountTransaction : TPCSafeBoxTransaction; var errors : AnsiString) : Boolean;
+    function CheckSignatures(AccountTransaction : TPCSafeBoxTransaction; var errors : String) : Boolean;
 
-    function DoOperation(AccountPreviousUpdatedBlock : TAccountPreviousBlockInfo; AccountTransaction : TPCSafeBoxTransaction; var errors : AnsiString) : Boolean; override;
-    procedure AffectedAccounts(list : TList); override;
+    function DoOperation(AccountPreviousUpdatedBlock : TAccountPreviousBlockInfo; AccountTransaction : TPCSafeBoxTransaction; var errors : String) : Boolean; override;
+    procedure AffectedAccounts(list : TList<Cardinal>); override;
     //
-    Function GetTransactionHashToSign : TRawBytes;
-    Function DoSignMultiOperationSigner(SignerAccount : Cardinal; key : TECPrivateKey) : Integer;
+    Function DoSignMultiOperationSigner(current_protocol : Word; SignerAccount : Cardinal; key : TECPrivateKey) : Integer;
     class function OpType : Byte; override;
     function OperationAmount : Int64; override;
     function OperationFee : Int64; override;
-    function OperationPayload : TRawBytes; override;
+    function OperationPayload : TOperationPayload; override;
     function SignerAccount : Cardinal; override;
-    procedure SignerAccounts(list : TList); override;
+    procedure SignerAccounts(list : TList<Cardinal>); override;
     function IsSignerAccount(account : Cardinal) : Boolean; override;
     function DestinationAccount : Int64; override;
     function SellerAccount : Int64; override;
@@ -130,7 +138,7 @@ Type
     function GetAccountN_Operation(account : Cardinal) : Cardinal; override;
     function OperationAmountByAccount(account : Cardinal) : Int64; override;
     //
-    Constructor CreateMultiOperation(const senders : TMultiOpSenders; const receivers : TMultiOpReceivers; const changes : TMultiOpChangesInfo; const senders_keys, changes_keys: Array of TECPrivateKey);
+    Constructor CreateMultiOperation(current_protocol : Word; const senders : TMultiOpSenders; const receivers : TMultiOpReceivers; const changes : TMultiOpChangesInfo; const senders_keys, changes_keys: Array of TECPrivateKey);
     Destructor Destroy; override;
     Function AddTx(const senders : TMultiOpSenders; const receivers : TMultiOpReceivers; setInRandomOrder : Boolean) : Boolean;
     Function AddChangeInfos(const changes : TMultiOpChangesInfo; setInRandomOrder : Boolean) : Boolean;
@@ -143,10 +151,13 @@ Type
     Function IndexOfAccountReceiver(nAccount : Cardinal; startPos : Integer) : Integer;
     Function IndexOfAccountChanger(nAccount : Cardinal) : Integer; overload;
     class Function IndexOfAccountChanger(nAccount : Cardinal; startPos : Integer; const changesInfo : TMultiOpChangesInfo) : Integer; overload;
-    class Function OpChangeAccountInfoTypesToText(const OpChangeAccountInfoTypes : TOpChangeAccountInfoTypes) : AnsiString;
+    class Function OpChangeAccountInfoTypesToText(const OpChangeAccountInfoTypes : TOpChangeAccountInfoTypes) : String;
     //
     Function toString : String; Override;
     Property Data : TOpMultiOperationData read FData;
+    Function GetDigestToSign : TRawBytes; override;
+
+    function IsValidSignatureBasedOnCurrentSafeboxState(ASafeBoxTransaction : TPCSafeBoxTransaction) : Boolean; override;
   End;
 
 implementation
@@ -190,7 +201,7 @@ begin
   Result := -1;
 end;
 
-class function TOpMultiOperation.OpChangeAccountInfoTypesToText(const OpChangeAccountInfoTypes: TOpChangeAccountInfoTypes): AnsiString;
+class function TOpMultiOperation.OpChangeAccountInfoTypesToText(const OpChangeAccountInfoTypes: TOpChangeAccountInfoTypes): String;
 Var opcit : TOpChangeAccountInfoType;
 begin
   Result := '';
@@ -204,7 +215,7 @@ end;
 
 procedure TOpMultiOperation.FillOperationResume(Block : Cardinal; getInfoForAllAccounts : Boolean; Affected_account_number : Cardinal; var OperationResume : TOperationResume);
 Var iSender,iReceiver,iChanger : Integer;
-  changerTxt : AnsiString;
+  changerTxt : String;
 begin
   inherited FillOperationResume(Block, getInfoForAllAccounts, Affected_account_number, OperationResume);
   OperationResume.isMultiOperation:=True;
@@ -239,12 +250,31 @@ begin
   end;
 end;
 
-function TOpMultiOperation.IndexOfAccountChangeNameTo(const newName: AnsiString): Integer;
+procedure TOpMultiOperation.CopyUsedPubkeySignatureFrom(SourceOperation: TPCOperation);
+var sourcemulti : TOpMultiOperation;
+  i : Integer;
 begin
-  If (newName<>'') then begin
+  inherited CopyUsedPubkeySignatureFrom(SourceOperation);
+  // Source MUST BE a TOpMultiOperation
+  if (SourceOperation is TOpMultiOperation) then begin
+    sourcemulti := TOpMultiOperation(SourceOperation);
+    SetLength(FtxSendersPubkeysUsedForSign,Length(sourcemulti.FtxSendersPubkeysUsedForSign));
+    for i:=0 to High(FtxSendersPubkeysUsedForSign) do begin
+      FtxSendersPubkeysUsedForSign[i] := sourcemulti.FtxSendersPubkeysUsedForSign[i];
+    end;
+    SetLength(FchangesInfoPubkeysUsedForSign,Length(sourcemulti.FchangesInfoPubkeysUsedForSign));
+    for i:=0 to High(FchangesInfoPubkeysUsedForSign) do begin
+      FchangesInfoPubkeysUsedForSign[i] := sourcemulti.FchangesInfoPubkeysUsedForSign[i];
+    end;
+  end else Raise Exception.Create('ERROR DEV 20181217-1 Source must be a TOpMultiOperation. Self:'+toString+' Source:'+SourceOperation.ToString);
+end;
+
+function TOpMultiOperation.IndexOfAccountChangeNameTo(const newName: TRawBytes): Integer;
+begin
+  If (Length(newName)>0) then begin
     for Result:=0 to high(FData.changesInfo) do begin
       If (account_name in FData.changesInfo[Result].Changes_type) And
-         (AnsiCompareText(FData.changesInfo[Result].New_Name,newName)=0) then exit;
+         (TBaseType.Equals(FData.changesInfo[Result].New_Name,newName)) then exit;
     end;
   end;
   Result := -1;
@@ -259,17 +289,24 @@ begin
   for i:=0 to High(FData.changesInfo) do begin
     FData.changesInfo[i].Signature := CT_TECDSA_SIG_Nul;
   end;
+  FHasValidSignature:=False;
+  SetLength(FtxSendersPubkeysUsedForSign,0);
+  SetLength(FchangesInfoPubkeysUsedForSign,0);
+  FBufferedSha256 := Nil;
+  FBufferedRipeMD160 := Nil;
 end;
 
-procedure TOpMultiOperation.InitializeData;
+procedure TOpMultiOperation.InitializeData(AProtocolVersion : Word);
 begin
-  inherited InitializeData;
+  inherited InitializeData(AProtocolVersion);
   SetLength(FData.txSenders,0);
   SetLength(FData.txReceivers,0);
   SetLength(FData.changesInfo,0);
   FSaveSignatureValue := True;
   FTotalAmount:=0;
   FTotalFee:=0;
+  SetLength(FtxSendersPubkeysUsedForSign,0);
+  SetLength(FchangesInfoPubkeysUsedForSign,0);
 end;
 
 function TOpMultiOperation.SaveOpToStream(Stream: TStream; SaveExtendedData: Boolean): Boolean;
@@ -281,7 +318,9 @@ var i : Integer;
   b : Byte;
 begin
   // Will save protocol info
-  w := CT_PROTOCOL_3;
+  if FProtocolVersion<CT_PROTOCOL_5 then
+    w := CT_PROTOCOL_3
+  else w := FProtocolVersion;
   stream.Write(w,SizeOf(w));
   // Save senders count
   w := Length(FData.txSenders);
@@ -291,7 +330,7 @@ begin
     stream.Write(txs.Account,SizeOf(txs.Account));
     stream.Write(txs.Amount,SizeOf(txs.Amount));
     stream.Write(txs.N_Operation,SizeOf(txs.N_Operation));
-    TStreamOp.WriteAnsiString(stream,txs.Payload);
+    SaveOperationPayloadToStream(stream,txs.Payload);
     If FSaveSignatureValue then begin
       TStreamOp.WriteAnsiString(stream,txs.Signature.r);
       TStreamOp.WriteAnsiString(stream,txs.Signature.s);
@@ -304,7 +343,7 @@ begin
     txr := FData.txReceivers[i];
     stream.Write(txr.Account,SizeOf(txr.Account));
     stream.Write(txr.Amount,SizeOf(txr.Amount));
-    TStreamOp.WriteAnsiString(stream,txr.Payload);
+    SaveOperationPayloadToStream(stream,txr.Payload);
   end;
   // Save changes info count
   w := Length(FData.changesInfo);
@@ -315,12 +354,17 @@ begin
     Stream.Write(chi.N_Operation,Sizeof(chi.N_Operation));
     b := 0;
     if (public_key in chi.Changes_type) then b:=b OR $01;
-    if (account_name in chi.changes_type) then b:=b OR $02;
-    if (account_type in chi.changes_type) then b:=b OR $04;
+    if (account_name in chi.Changes_type) then b:=b OR $02;
+    if (account_type in chi.Changes_type) then b:=b OR $04;
+    if (account_data in chi.Changes_type) then b:=b OR $08;
+
     Stream.Write(b,Sizeof(b));
     TStreamOp.WriteAccountKey(Stream,chi.New_Accountkey);
     TStreamOp.WriteAnsiString(Stream,chi.New_Name);
     Stream.Write(chi.New_Type,Sizeof(chi.New_Type));
+    if FProtocolVersion>=CT_PROTOCOL_5 then begin
+      TStreamOp.WriteAnsiString(Stream,chi.New_Data);
+    end;
     If FSaveSignatureValue then begin
       TStreamOp.WriteAnsiString(Stream,chi.Signature.r);
       TStreamOp.WriteAnsiString(Stream,chi.Signature.s);
@@ -331,7 +375,7 @@ end;
 
 function TOpMultiOperation.LoadOpFromStream(Stream: TStream; LoadExtendedData: Boolean): Boolean;
 var i : Integer;
-  w : Word;
+  w, LSavedProtocol : Word;
   txs : TMultiOpSender;
   txr : TMultiOpReceiver;
   chi : TMultiOpChangeInfo;
@@ -347,6 +391,8 @@ begin
   FTotalAmount:=0;
   FTotalFee:=0;
   FHasValidSignature:=False;
+  SetLength(FtxSendersPubkeysUsedForSign,0);
+  SetLength(FchangesInfoPubkeysUsedForSign,0);
 
   SetLength(txsenders,0);
   SetLength(txreceivers,0);
@@ -355,8 +401,8 @@ begin
   Result := False;
   Try
     // Read protocol info
-    stream.Read(w,SizeOf(w));
-    If w<>CT_PROTOCOL_3 then Raise Exception.Create('Invalid protocol found');
+    stream.Read(LSavedProtocol,SizeOf(LSavedProtocol));
+    If (Not (LSavedProtocol in [CT_PROTOCOL_3..CT_PROTOCOL_MAX])) then Raise Exception.Create('Invalid protocol found '+IntToStr(LSavedProtocol));
     // Load senders
     stream.Read(w,SizeOf(w));
     If w>CT_MAX_MultiOperation_Senders then Raise Exception.Create('Max senders');
@@ -367,7 +413,7 @@ begin
         stream.Read(txs.Account,SizeOf(txs.Account));
         stream.Read(txs.Amount,SizeOf(txs.Amount));
         stream.Read(txs.N_Operation,SizeOf(txs.N_Operation));
-        TStreamOp.ReadAnsiString(stream,txs.Payload);
+        LoadOperationPayloadFromStream(stream,txs.Payload);
         TStreamOp.ReadAnsiString(stream,txs.Signature.r);
         TStreamOp.ReadAnsiString(stream,txs.Signature.s);
         //
@@ -383,7 +429,7 @@ begin
         txr := CT_TMultiOpReceiver_NUL;
         stream.Read(txr.Account,SizeOf(txr.Account));
         stream.Read(txr.Amount,SizeOf(txr.Amount));
-        TStreamOp.ReadAnsiString(stream,txr.Payload);
+        LoadOperationPayloadFromStream(stream,txr.Payload);
         //
         txreceivers[i] := txr;
       end;
@@ -402,11 +448,17 @@ begin
         if (b AND $01)=$01 then chi.changes_type:=chi.changes_type + [public_key];
         if (b AND $02)=$02 then chi.changes_type:=chi.changes_type + [account_name];
         if (b AND $04)=$04 then chi.changes_type:=chi.changes_type + [account_type];
+        if (b AND $08)=$08 then chi.changes_type:=chi.changes_type + [account_data];
         // Check
-        if (b AND $F8)<>0 then Exit;
+        if (LSavedProtocol=CT_PROTOCOL_3) and ((b AND $F8)<>0) then Exit;
+        if (b AND $F0)<>0 then Exit;
         TStreamOp.ReadAccountKey(Stream,chi.New_Accountkey);
         TStreamOp.ReadAnsiString(Stream,chi.New_Name);
         Stream.Read(chi.New_Type,Sizeof(chi.New_Type));
+        if (LSavedProtocol<>CT_PROTOCOL_3) then begin
+          TStreamOp.ReadAnsiString(Stream,chi.New_Data);
+        end;
+
         TStreamOp.ReadAnsiString(Stream,chi.Signature.r);
         TStreamOp.ReadAnsiString(Stream,chi.Signature.s);
         //
@@ -436,23 +488,31 @@ begin
   end;
 end;
 
-function TOpMultiOperation.CheckSignatures(AccountTransaction: TPCSafeBoxTransaction; var errors: AnsiString): Boolean;
+function TOpMultiOperation.CheckSignatures(AccountTransaction: TPCSafeBoxTransaction; var errors: String): Boolean;
 var i : Integer;
   acc : TAccount;
   ophtosign : TRawBytes;
 begin
   // Init
-  FHasValidSignature:=False;
   SetLength(errors,0);
+  // Will reuse FHasValidSignature if checked previously and was True and was signed using same public keys
+  // Introduced on Build 4.0.2 to increase speed using MEMPOOL verified operations instead of verify again everytime
+  // Multioperations will not use standard TPCOperation.IsValidECDSASignature call because will need to check more than 1 signature
+  Result := False;
   // Do check it!
   Try
-    ophtosign := GetTransactionHashToSign;
+    ophtosign := GetDigestToSign;
     // Tx verification
     For i:=Low(FData.txSenders) to High(FData.txSenders) do begin
       acc := AccountTransaction.Account(FData.txSenders[i].Account);
       If (length(FData.txSenders[i].Signature.r)>0) And
          (length(FData.txSenders[i].Signature.s)>0) then begin
-        If Not TCrypto.ECDSAVerify(acc.accountInfo.accountkey,ophtosign,FData.txSenders[i].Signature) then begin
+        If (FHasValidSignature) And (i<=High(FtxSendersPubkeysUsedForSign)) And (TAccountComp.EqualAccountKeys(FtxSendersPubkeysUsedForSign[i],acc.accountInfo.accountKey)) then begin
+          // Nothing to do, previously signed using same public key
+        end else If TCrypto.ECDSAVerify(acc.accountInfo.accountkey,ophtosign,FData.txSenders[i].Signature) then begin
+          if length(FtxSendersPubkeysUsedForSign)<=i then SetLength(FtxSendersPubkeysUsedForSign,i+1);
+          FtxSendersPubkeysUsedForSign[i] := acc.accountInfo.accountKey;
+        end else begin
           errors := Format('Invalid signature for sender %d/%d',[i+1,length(FData.txSenders)]);
           Exit;
         end;
@@ -466,7 +526,12 @@ begin
       acc := AccountTransaction.Account(FData.changesInfo[i].Account);
       If (length(FData.changesInfo[i].Signature.r)>0) And
          (length(FData.changesInfo[i].Signature.s)>0) then begin
-        If Not TCrypto.ECDSAVerify(acc.accountInfo.accountkey,ophtosign,FData.changesInfo[i].Signature) then begin
+        If (FHasValidSignature) And (i<=High(FchangesInfoPubkeysUsedForSign)) And (TAccountComp.EqualAccountKeys(FchangesInfoPubkeysUsedForSign[i],acc.accountInfo.accountKey)) then begin
+          // Nothing to do, previously signed using same public key
+        end else If TCrypto.ECDSAVerify(acc.accountInfo.accountkey,ophtosign,FData.changesInfo[i].Signature) then begin
+          if length(FchangesInfoPubkeysUsedForSign)<=i then SetLength(FchangesInfoPubkeysUsedForSign,i+1);
+          FchangesInfoPubkeysUsedForSign[i] := acc.accountInfo.accountKey;
+        end else begin
           errors := Format('Invalid signature for change info %d/%d',[i+1,length(FData.changesInfo)]);
           Exit;
         end;
@@ -476,13 +541,13 @@ begin
       end;
     end;
     // If here... all Ok
-    FHasValidSignature:=True;
+    Result:=True;
   finally
-    Result := FHasValidSignature;
+    FHasValidSignature := Result;
   end;
 end;
 
-function TOpMultiOperation.DoOperation(AccountPreviousUpdatedBlock : TAccountPreviousBlockInfo; AccountTransaction: TPCSafeBoxTransaction; var errors: AnsiString): Boolean;
+function TOpMultiOperation.DoOperation(AccountPreviousUpdatedBlock : TAccountPreviousBlockInfo; AccountTransaction: TPCSafeBoxTransaction; var errors: String): Boolean;
 var i,j : Integer;
   txs : TMultiOpSender;
   txr : TMultiOpReceiver;
@@ -492,11 +557,13 @@ var i,j : Integer;
   senders,senders_n_operation,receivers : Array of Cardinal;
   senders_amount : Array of UInt64;
   receivers_amount : Array of UInt64;
+  LSafeboxCurrentProtocol : Integer;
 begin
   // Check valid info:
   Result := False;
   errors := '';
-  if (AccountTransaction.FreezedSafeBox.CurrentProtocol<CT_PROTOCOL_3) then begin
+  LSafeboxCurrentProtocol := AccountTransaction.FreezedSafeBox.CurrentProtocol;
+  if (LSafeboxCurrentProtocol<CT_PROTOCOL_3) then begin
     errors := 'NEED PROTOCOL 3';
     exit;
   end;
@@ -534,8 +601,8 @@ begin
       errors := Format('Invalid amount %d (0 or max: %d)',[txs.Amount,CT_MaxTransactionAmount]);
       Exit;
     end;
-    if (length(txs.Payload)>CT_MaxPayloadSize) then begin
-      errors := 'Invalid Payload size:'+inttostr(length(txs.Payload))+' (Max: '+inttostr(CT_MaxPayloadSize)+')';
+    if (length(txs.Payload.payload_raw)>CT_MaxPayloadSize) then begin
+      errors := 'Invalid Payload size:'+inttostr(length(txs.Payload.payload_raw))+' (Max: '+inttostr(CT_MaxPayloadSize)+')';
       Exit;
     end;
     //
@@ -571,8 +638,8 @@ begin
       errors := Format('Invalid amount %d (0 or max: %d)',[txr.Amount,CT_MaxTransactionAmount]);
       Exit;
     end;
-    if (length(txr.Payload)>CT_MaxPayloadSize) then begin
-      errors := 'Invalid Payload size:'+inttostr(length(txr.Payload))+' (Max: '+inttostr(CT_MaxPayloadSize)+')';
+    if (length(txr.Payload.payload_raw)>CT_MaxPayloadSize) then begin
+      errors := 'Invalid Payload size:'+inttostr(length(txr.Payload.payload_raw))+' (Max: '+inttostr(CT_MaxPayloadSize)+')';
       Exit;
     end;
     //
@@ -605,12 +672,12 @@ begin
       exit;
     end;
     If (public_key in chi.Changes_type) then begin
-      If Not TAccountComp.IsValidAccountKey( chi.New_Accountkey, errors ) then begin
+      If Not TAccountComp.IsValidAccountKey( chi.New_Accountkey, LSafeboxCurrentProtocol, errors) then begin
         Exit;
       end;
     end;
     If (account_name in chi.changes_type) then begin
-      If (chi.New_Name<>'') then begin
+      If (Length(chi.New_Name)>0) then begin
         If Not TPCSafeBox.ValidAccountName(chi.New_Name,errors) then Exit;
         // Check name not found!
         j := AccountTransaction.FindAccountByNameInTransaction(chi.New_Name,newNameWasAdded, newNameWasDeleted);
@@ -620,8 +687,24 @@ begin
         end;
       end;
     end else begin
-      If (chi.New_Name<>'') then begin
+      If (Length(chi.New_Name)>0) then begin
         errors := 'Invalid data in new_name field';
+        Exit;
+      end;
+    end;
+    // Account Data protection: (PIP-0024)
+    if (account_data in chi.Changes_type) then begin
+      if (LSafeboxCurrentProtocol<CT_PROTOCOL_5) then begin
+        errors := 'Account Data not available until protocol 5';
+        Exit;
+      end;
+      if Length(chi.New_Data)>CT_MaxAccountDataSize then begin
+        errors := 'New data length ('+IntToStr(Length(chi.New_data))+') > '+IntToStr(CT_MaxAccountDataSize);
+        Exit;
+      end;
+    end else begin
+      if Length(chi.New_Data)<>0 then begin
+        errors := 'New data must be null when no data change';
         Exit;
       end;
     end;
@@ -634,7 +717,7 @@ begin
   If Not CheckSignatures(AccountTransaction,errors) then Exit;
   // Execute!
   If (length(senders)>0) then begin
-    If Not AccountTransaction.TransferAmounts(AccountPreviousUpdatedBlock,
+    If Not AccountTransaction.TransferAmounts(AccountPreviousUpdatedBlock, RipeMD160,
       senders,senders_n_operation,senders_amount,
       receivers,receivers_amount,errors) then Begin
       TLog.NewLog(ltError,ClassName,'FATAL ERROR DEV 20180312-1 '+errors); // This must never happen!
@@ -653,6 +736,7 @@ begin
       changer.accountInfo.price := 0;
       changer.accountInfo.account_to_pay := 0;
       changer.accountInfo.new_publicKey := CT_TECDSA_Public_Nul;
+      changer.accountInfo.hashed_secret := Nil;
     end;
     If (account_name in chi.Changes_type) then begin
       changer.name := chi.New_Name;
@@ -660,11 +744,16 @@ begin
     If (account_type in chi.Changes_type) then begin
       changer.account_type := chi.New_Type;
     end;
+    If (account_data in chi.Changes_type) then begin
+      changer.account_data := chi.New_Data;
+    end;
     If Not AccountTransaction.UpdateAccountInfo(
            AccountPreviousUpdatedBlock,
+           GetOpID,
            chi.Account,chi.N_Operation,chi.Account,
            changer.accountInfo,
            changer.name,
+           changer.account_data,
            changer.account_type,
            0,errors) then begin
       TLog.NewLog(ltError,ClassName,'FATAL ERROR DEV 20180312-2 '+errors); // This must never happen!
@@ -674,11 +763,11 @@ begin
   Result := True;
 end;
 
-procedure TOpMultiOperation.AffectedAccounts(list: TList);
+procedure TOpMultiOperation.AffectedAccounts(list: TList<Cardinal>);
 Var i : Integer;
   Procedure _doAdd(nAcc : Cardinal);
   Begin
-    If list.IndexOf(TObject(nAcc))<0 then list.Add(TObject(nAcc));
+    If list.IndexOf(nAcc)<0 then list.Add(nAcc);
   end;
 begin
   For i:=low(FData.txSenders) to High(FData.txSenders) do begin
@@ -692,38 +781,16 @@ begin
   end;
 end;
 
-function TOpMultiOperation.GetTransactionHashToSign : TRawBytes;
-Var ms : TMemoryStream;
-  rb : TRawBytes;
-  old : Boolean;
-begin
-  ms := TMemoryStream.Create;
-  try
-    old := FSaveSignatureValue;
-    Try
-      FSaveSignatureValue:=False;
-      SaveOpToStream(ms,False);
-    finally
-      FSaveSignatureValue:=old;
-    end;
-    SetLength(Result,ms.Size);
-    ms.Position := 0;
-    ms.ReadBuffer(Result[1],ms.Size);
-  finally
-    ms.Free;
-  end;
-end;
-
-function TOpMultiOperation.DoSignMultiOperationSigner(SignerAccount : Cardinal; key : TECPrivateKey) : Integer;
+function TOpMultiOperation.DoSignMultiOperationSigner(current_protocol : Word; SignerAccount : Cardinal; key : TECPrivateKey) : Integer;
 Var i : Integer;
   raw : TRawBytes;
   _sign : TECDSA_SIG;
 begin
   Result := 0;
-  If Not Assigned(key.PrivateKey) then begin
+  If Not key.HasPrivateKey then begin
     exit;
   end;
-  raw := GetTransactionHashToSign;
+  raw := GetDigestToSign;
   Try
     _sign := TCrypto.ECDSASign(key.PrivateKey,raw);
   Except
@@ -764,9 +831,9 @@ begin
   Result := FTotalFee;
 end;
 
-function TOpMultiOperation.OperationPayload: TRawBytes;
+function TOpMultiOperation.OperationPayload: TOperationPayload;
 begin
-  Result := '';
+  Result := CT_TOperationPayload_NUL;
 end;
 
 function TOpMultiOperation.SignerAccount: Cardinal;
@@ -777,15 +844,15 @@ begin
   else Result := MaxInt;
 end;
 
-procedure TOpMultiOperation.SignerAccounts(list: TList);
+procedure TOpMultiOperation.SignerAccounts(list: TList<Cardinal>);
 var i : Integer;
 begin
   list.Clear;
   for i := 0 to High(FData.txSenders) do begin
-    list.Add(TObject(FData.txSenders[i].Account));
+    list.Add(FData.txSenders[i].Account);
   end;
   for i:= 0 to High(FData.changesInfo) do begin
-    if list.IndexOf(TObject(FData.changesInfo[i].Account))<0 then list.Add(TObject(FData.changesInfo[i].Account));
+    if list.IndexOf(FData.changesInfo[i].Account)<0 then list.Add(FData.changesInfo[i].Account);
   end;
 end;
 
@@ -793,6 +860,12 @@ function TOpMultiOperation.IsSignerAccount(account: Cardinal): Boolean;
 begin
   // This function will override previous due it can be Multi signed
   Result := (IndexOfAccountSender(account)>=0) Or (IndexOfAccountChanger(account)>=0);
+end;
+
+function TOpMultiOperation.IsValidSignatureBasedOnCurrentSafeboxState(ASafeBoxTransaction: TPCSafeBoxTransaction): Boolean;
+var errors : String;
+begin
+  Result := CheckSignatures(ASafeBoxTransaction,errors);
 end;
 
 function TOpMultiOperation.DestinationAccount: Int64;
@@ -848,13 +921,13 @@ begin
   until i<0;
 end;
 
-constructor TOpMultiOperation.CreateMultiOperation(
+constructor TOpMultiOperation.CreateMultiOperation(current_protocol : Word;
   const senders: TMultiOpSenders; const receivers: TMultiOpReceivers;
   const changes: TMultiOpChangesInfo; const senders_keys,
   changes_keys: array of TECPrivateKey);
 Var i : Integer;
 begin
-  inherited Create;
+  inherited Create(current_protocol);
   AddTx(senders,receivers,True);
   AddChangeInfos(changes,True);
   // Protection for "Exit"
@@ -862,13 +935,13 @@ begin
   If (length(senders_keys)<>length(senders)) then exit; // Cannot sign!
   If (length(changes_keys)<>length(changes)) then exit; // Cannot sign!
   For i:=low(senders) to high(senders) do begin
-    If DoSignMultiOperationSigner(senders[i].Account,senders_keys[i])=0 then begin
+    If DoSignMultiOperationSigner(current_protocol,senders[i].Account,senders_keys[i])=0 then begin
       TLog.NewLog(lterror,Classname,'Error signing a new MultiOperation sender');
       Exit;
     end;
   end;
   For i:=Low(changes) to high(changes) do begin
-    If DoSignMultiOperationSigner(changes[i].Account,changes_keys[i])=0 then begin
+    If DoSignMultiOperationSigner(current_protocol,changes[i].Account,changes_keys[i])=0 then begin
       TLog.NewLog(lterror,Classname,'Error signing a new MultiOperation change');
       Exit;
     end;
@@ -960,7 +1033,7 @@ begin
     // check valid Change type
     for ct:=Low(TOpChangeAccountInfoType) to High(TOpChangeAccountInfoType) do begin
       case ct of
-        public_key,account_name,account_type : ; // Allowed
+        public_key,account_name,account_type,account_data : ; // Allowed
       else
         if (ct in changes[i].Changes_type) then begin
           Exit; // Not allowed multioperation change type
@@ -1038,6 +1111,35 @@ begin
     [length(FData.txSenders),length(FData.txReceivers),length(FData.changesInfo),
      TAccountComp.FormatMoney(FTotalAmount),
      TAccountComp.FormatMoney(FTotalFee)]);
+end;
+
+function TOpMultiOperation.GetDigestToSign: TRawBytes;
+Var ms : TMemoryStream;
+  rb : TRawBytes;
+  old : Boolean;
+  b : Byte;
+begin
+  ms := TMemoryStream.Create;
+  try
+    old := FSaveSignatureValue;
+    Try
+      FSaveSignatureValue:=False;
+      SaveOpToStream(ms,False);
+    finally
+      FSaveSignatureValue:=old;
+    end;
+    if (ProtocolVersion<=CT_PROTOCOL_3) then begin
+      ms.Position := 0;
+      SetLength(Result,ms.Size);
+      ms.ReadBuffer(Result[Low(Result)],ms.Size);
+    end else begin
+      b := OpType;
+      ms.Write(b,1);
+      Result := TCrypto.DoSha256(ms.Memory,ms.Size);
+    end;
+  finally
+    ms.Free;
+  end;
 end;
 
 end.

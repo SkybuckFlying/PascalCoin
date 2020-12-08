@@ -1,21 +1,24 @@
 unit UFolderHelper;
 
-{$IFDEF FPC}
-  {$MODE Delphi}
-{$ENDIF}
-
 { Copyright (c) 2016 by Albert Molina
 
   Distributed under the MIT software license, see the accompanying file LICENSE
   or visit http://www.opensource.org/licenses/mit-license.php.
 
-  This unit is a part of Pascal Coin, a P2P crypto currency without need of
-  historical operations.
+  This unit is a part of the PascalCoin Project, an infinitely scalable
+  cryptocurrency. Find us here:
+  Web: https://www.pascalcoin.org
+  Source: https://github.com/PascalCoin/PascalCoin
 
-  If you like it, consider a donation using BitCoin:
+  If you like it, consider a donation using Bitcoin:
   16K3HCZRhFUtM8GdWRcfKeaa6KsuyxZaYk
 
-  }
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
+
+{$IFDEF FPC}
+  {$MODE Delphi}
+{$ENDIF}
 
 interface
 
@@ -41,12 +44,12 @@ Type TFileVersionInfo = record
 
   TFolderHelper = record
   strict private
-    {$IFnDEF FPC}
+    {$IF (not Defined(FPC)) and (Defined(MSWINDOWS))}
     class function GetFolder(const aCSIDL: Integer): string; static;
     {$ENDIF}
     class function GetAppDataFolder : string; static;
   public
-    class function GetPascalCoinDataFolder : string; static;
+    class Function GetDataFolder(const AFolderName : string): string; static;
     class Function GetTFileVersionInfo(Const FileName : String) : TFileVersionInfo; static;
   end;
 
@@ -54,20 +57,21 @@ implementation
 
 uses
 {$IFnDEF FPC}
+  {$IFDEF MSWINDOWS}
   Windows, ShlObj,
   {$DEFINE FILEVERSIONINFO}
+  {$ELSE}
+  System.IOUtils,
+  {$ENDIF}
 {$ELSE}
   {$IFDEF WIN}
   Windows,
   {$DEFINE FILEVERSIONINFO}
   {$ENDIF}
-  {LCLIntf, LCLType, LMessages,}
 {$ENDIF}
   SysUtils;
 
-{$I config.inc}
-
-{$IFnDEF FPC}
+{$IF (not Defined(FPC)) and (Defined(MSWINDOWS))}
 function SHGetFolderPath(hwnd: HWND; csidl: Integer; hToken: THandle;
   dwFlags: DWord; pszPath: LPWSTR): HRESULT; stdcall;
   forward;
@@ -83,11 +87,15 @@ begin
   Result :=GetEnvironmentVariable('HOME');
   {$ENDIF}
   {$ELSE}
+  {$IFDEF MSWINDOWS}
   Result := GetFolder(CSIDL_APPDATA); // c:\Users\(User Name)\AppData\Roaming
+  {$ELSE}
+  Result := TPath.GetDocumentsPath;
+  {$ENDIF}
   {$ENDIF}
 end;
 
-{$IFnDEF FPC}
+{$IF (not Defined(FPC)) and (Defined(MSWINDOWS))}
 class function TFolderHelper.GetFolder(const aCSIDL: Integer): string;
 var
   FolderPath: array[0 .. MAX_PATH] of Char;
@@ -98,13 +106,11 @@ begin
 end;
 {$ENDIF}
 
-class function TFolderHelper.GetPascalCoinDataFolder: string;
+class function TFolderHelper.GetDataFolder(const AFolderName : string): string;
 begin
-  {$IFDEF TESTNET}
-  Result := GetAppDataFolder+PathDelim+'PascalCoin_TESTNET';
-  {$ELSE}
-  Result := GetAppDataFolder+PathDelim+'PascalCoin';
-  {$ENDIF}
+  if (AFolderName<>'') then
+    Result := GetAppDataFolder+PathDelim+AFolderName
+  else Result := GetAppDataFolder;
 end;
 
 class function TFolderHelper.GetTFileVersionInfo(Const FileName: String): TFileVersionInfo;

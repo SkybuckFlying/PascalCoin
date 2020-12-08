@@ -1,21 +1,20 @@
 unit UECIES;
 
-{$IFDEF FPC}
-  {$MODE Delphi}
-{$ENDIF}
-
 { Copyright (c) 2016 by Albert Molina
 
   Distributed under the MIT software license, see the accompanying file LICENSE
   or visit http://www.opensource.org/licenses/mit-license.php.
 
-  This unit is a part of Pascal Coin, a P2P crypto currency without need of
-  historical operations.
+  This unit is a part of the PascalCoin Project, an infinitely scalable
+  cryptocurrency. Find us here:
+  Web: https://www.pascalcoin.org
+  Source: https://github.com/PascalCoin/PascalCoin
 
-  If you like it, consider a donation using BitCoin:
+  If you like it, consider a donation using Bitcoin:
   16K3HCZRhFUtM8GdWRcfKeaa6KsuyxZaYk
 
-  }
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
 
 { Pascal implementation of ECIES functions to encrypt/decrypt data using AES
   and EC keys.
@@ -34,30 +33,33 @@ unit UECIES;
   to use strong anti-corruption in encrypted data because I will include it
   in a blockchain, so corruption is not possible. (for now ;-). Using MD5 safe space
   for me.
+}
 
-  }
+{$IFDEF FPC}
+  {$MODE Delphi}
+{$ENDIF}
 
-{$I config.inc}
+{$I ./../config.inc}
+
+{$IF not Defined(Use_OpenSSL)}
+  {$Message Warn 'ERROR: Use_OpenSSL is not defined, you should not use this UNIT!'}
+{$ENDIF}
 
 interface
 
-Uses UOpenSSLdef, UOpenSSL, UCrypto, ULog, UConst;
+Uses UOpenSSL, UCrypto, ULog, UConst, UBaseTypes, UPCDataTypes;
 
 Const CT_Max_Bytes_To_Encrypt = 32000;
 
 Type size_t = Word;
 
-function ECIESEncrypt(const ECDSAPubKey: TECDSA_Public; const MessageToEncrypt: AnsiString): TRawBytes; overload;
-function ECIESEncrypt(EC_OpenSSL_NID : Word; PubKey: EC_POINT; const MessageToEncrypt: AnsiString): TRawBytes; overload;
-function ECIESDecrypt(EC_OpenSSL_NID : Word; PrivateKey: PEC_KEY; logErrors : Boolean; const MessageToDecrypt: TRawBytes; Var Decrypted : AnsiString): Boolean;
+function ECIESEncrypt(const ECDSAPubKey: TECDSA_Public; const RawToEncrypt: TRawBytes): TRawBytes; overload;
+function ECIESEncrypt(EC_OpenSSL_NID : Word; PubKey: EC_POINT; const RawToEncrypt: TRawBytes): TRawBytes; overload;
+function ECIESDecrypt(EC_OpenSSL_NID : Word; PrivateKey: PEC_KEY; logErrors : Boolean; const MessageToDecrypt: TRawBytes; Var Decrypted : TRawBytes): Boolean;
 
 implementation
 
-uses
-{$IFnDEF FPC}
-  Windows,
-{$ENDIF}
-  SysUtils, UAES;
+uses SysUtils;
 
 Type
   Psecure_t = Pointer;
@@ -142,14 +144,14 @@ begin
   Result := EVP_md5;
 end;
 
-function ECIESEncrypt(const ECDSAPubKey: TECDSA_Public; const MessageToEncrypt: AnsiString): TRawBytes;
+function ECIESEncrypt(const ECDSAPubKey: TECDSA_Public; const RawToEncrypt: TRawBytes): TRawBytes;
 Var BNx,BNy : PBIGNUM;
   ECG : PEC_GROUP;
   ctx : PBN_CTX;
   pub_key : PEC_POINT;
   s : String;
 begin
-  Result := '';
+  SetLength(Result,0);
   BNx := BN_bin2bn(PAnsiChar(ECDSAPubKey.x),length(ECDSAPubKey.x),nil);
   BNy := BN_bin2bn(PAnsiChar(ECDSAPubKey.y),length(ECDSAPubKey.y),nil);
   Try
@@ -164,7 +166,7 @@ begin
     pub_key := EC_POINT_new(ECG);
     ctx := BN_CTX_new;
     if EC_POINT_set_affine_coordinates_GFp(ECG,pub_key,BNx,BNy,ctx)=1 then begin
-      Result := ECIESEncrypt(ECDSAPubKey.EC_OpenSSL_NID,pub_key^,MessageToEncrypt);
+      Result := ECIESEncrypt(ECDSAPubKey.EC_OpenSSL_NID,pub_key^,RawToEncrypt);
     end else begin
       s := Format('An error occurred while trying to convert public key to public point {error = %s}',
          [ERR_error_string(ERR_get_error(),nil)]);
@@ -179,7 +181,7 @@ begin
   End;
 End;
 
-function ECIESEncrypt(EC_OpenSSL_NID : Word; PubKey: EC_POINT; const MessageToEncrypt: AnsiString): TRawBytes;
+function ECIESEncrypt(EC_OpenSSL_NID : Word; PubKey: EC_POINT; const RawToEncrypt: TRawBytes): TRawBytes;
 Var PK,PEphemeral : PEC_KEY;
   i,key_length,block_length,envelope_length,body_length : Integer;
   mac_length : Cardinal;
@@ -195,15 +197,15 @@ Var PK,PEphemeral : PEC_KEY;
   hmac : HMAC_CTX;
   {$ENDIF}
 begin
-  Result := '';
-  if length(MessageToEncrypt)>CT_Max_Bytes_To_Encrypt then begin
-    TLog.NewLog(lterror,'ECIES','Max bytes to encrypt: '+inttostr(length(MessageToEncrypt))+'>'+Inttostr(CT_Max_Bytes_To_Encrypt));
+  SetLength(Result,0);
+  if length(RawToEncrypt)>CT_Max_Bytes_To_Encrypt then begin
+    TLog.NewLog(lterror,'ECIES','Max bytes to encrypt: '+inttostr(length(RawToEncrypt))+'>'+Inttostr(CT_Max_Bytes_To_Encrypt));
     exit;
   end;
   // Make sure we are generating enough key material for the symmetric ciphers.
   key_length := (EVP_CIPHER_key_length(EVP_aes_256_cbc));
   if (key_length*2)>SHA512_DIGEST_LENGTH then begin
-    TLog.NewLog(lterror,'ECIES',Format('The key derivation method will not produce enough envelope key material for the chosen ciphers. {envelope = %i / required = %zu}',
+    TLog.NewLog(lterror,'ECIES',Format('The key derivation method will not produce enough envelope key material for the chosen ciphers. {envelope = %i / required = %d}',
       [SHA512_DIGEST_LENGTH DIV 8,(key_length * 2) DIV 8]));
     exit;
   end;
@@ -228,18 +230,18 @@ begin
     // Determine the envelope and block lengths so we can allocate a buffer for the result.
     block_length := EVP_CIPHER_block_size(EVP_aes_256_cbc);
     if (block_length=0) or (block_length>EVP_MAX_BLOCK_LENGTH) then begin
-      TLog.NewLog(lterror,'ECIES',Format('Invalid block length {block = %zu}',[block_length]));
+      TLog.NewLog(lterror,'ECIES',Format('Invalid block length {block = %d}',[block_length]));
       exit;
     end;
     envelope_length := EC_POINT_point2oct(EC_KEY_get0_group(PEphemeral),EC_KEY_get0_public_key(PEphemeral),POINT_CONVERSION_COMPRESSED,nil,0,nil);
     if (envelope_length=0) then begin
-      TLog.NewLog(lterror,'ECIES',Format('Invalid envelope length {envelope = %zu}',[envelope_length]));
+      TLog.NewLog(lterror,'ECIES',Format('Invalid envelope length {envelope = %d}',[envelope_length]));
       exit;
     end;
     // We use a conditional to pad the length if the input buffer is not evenly divisible by the block size.
-    if (Length(MessageToEncrypt) MOD block_length)=0 then i := 0
-    else i := block_length - (Length(MessageToEncrypt) MOD block_length);
-    cryptex := secure_alloc(envelope_length,EVP_MD_size(ECIES_HASHER),Length(MessageToEncrypt), Length(MessageToEncrypt) + i);
+    if (Length(RawToEncrypt) MOD block_length)=0 then i := 0
+    else i := block_length - (Length(RawToEncrypt) MOD block_length);
+    cryptex := secure_alloc(envelope_length,EVP_MD_size(ECIES_HASHER),Length(RawToEncrypt), Length(RawToEncrypt) + i);
     try
       // Store the public key portion of the ephemeral key.
       If EC_POINT_point2oct(EC_KEY_get0_group(PEphemeral),EC_KEY_get0_public_key(PEphemeral),
@@ -249,11 +251,7 @@ begin
         exit;
       end;
       // For now we use an empty initialization vector.
-      {$IFDEF FPC}
-      FillByte(iv,EVP_MAX_IV_LENGTH,0);
-      {$ELSE}
-      FillMemory(@iv,EVP_MAX_IV_LENGTH,0);
-      {$ENDIF}
+      FillChar(iv,EVP_MAX_IV_LENGTH,0);
       // Setup the cipher context, the body length, and store a pointer to the body buffer location.
 
       {$IFDEF OpenSSL10}
@@ -268,28 +266,23 @@ begin
         // Initialize the cipher with the envelope key.
         if (EVP_EncryptInit_ex(pcipher,EVP_aes_256_cbc,nil,@envelope_key,@iv)<>1) or
           (EVP_CIPHER_CTX_set_padding(pcipher,0)<>1) or
-          (EVP_EncryptUpdate(pcipher,body,body_length,@MessageToEncrypt[1],
-            Length(MessageToEncrypt) - (Length(MessageToEncrypt) MOD block_length))<>1) then begin
+          (EVP_EncryptUpdate(pcipher,body,body_length,@RawToEncrypt[Low(RawToEncrypt)],
+            Length(RawToEncrypt) - (Length(RawToEncrypt) MOD block_length))<>1) then begin
               TLog.NewLog(lterror,'ECIES',Format('An error occurred while trying to secure the data using the chosen symmetric cipher. {error = %s}',
               [ERR_error_string(ERR_get_error(),nil)]));
               exit;
             end;
         // Check whether all of the data was encrypted. If they don't match up, we either have a partial block remaining, or an error occurred.
-        if (body_length<>Length(MessageToEncrypt)) then begin
+        if (body_length<>Length(RawToEncrypt)) then begin
           // Make sure all that remains is a partial block, and their wasn't an error
-          if (Length(MessageToEncrypt) - body_length >= block_length) then begin
+          if (Length(RawToEncrypt) - body_length >= block_length) then begin
             TLog.NewLog(lterror,'ECIES',Format('Unable to secure the data using the chosen symmetric cipher. {error = %s}',
             [ERR_error_string(ERR_get_error(),nil)]));
             exit;
           end;
           // Copy the remaining data into our partial block buffer. The memset() call ensures any extra bytes will be zero'ed out.
-          //SetLength(block,EVP_MAX_BLOCK_LENGTH);
-          {$IFDEF FPC}
-          FillByte(block,length(block),0);
-          {$ELSE}
-          FillMemory(@block,length(block),0);
-          {$ENDIF}
-          CopyMemory(@block,Pointer(PtrInt(@MessageToEncrypt[1])+body_length),Length(MessageToEncrypt)-body_length);
+          FillChar(block,length(block),0);
+          Move(RawToEncrypt[Low(RawToEncrypt)+body_length],block,Length(RawToEncrypt)-body_length);
           // Advance the body pointer to the location of the remaining space, and calculate just how much room is still available.
           body := Pointer(PtrInt(body)+body_length);
           body_length := secure_body_length(cryptex) - body_length;
@@ -351,7 +344,7 @@ begin
         {$ENDIF}
       End;
       SetLength(Result,secure_total_length(cryptex));
-      CopyMemory(@Result[1],cryptex,length(Result));
+      Move(cryptex^,Result[Low(Result)],Length(Result));
     finally
       secure_free(cryptex);
     end;
@@ -388,7 +381,7 @@ Begin
 End;
 
 
-function ECIESDecrypt(EC_OpenSSL_NID : Word; PrivateKey: PEC_KEY; logErrors : Boolean; const MessageToDecrypt: TRawBytes; Var Decrypted : AnsiString): Boolean;
+function ECIESDecrypt(EC_OpenSSL_NID : Word; PrivateKey: PEC_KEY; logErrors : Boolean; const MessageToDecrypt: TRawBytes; Var Decrypted : TRawBytes): Boolean;
 var
   cryptex : Psecure_t;
   phmac : PHMAC_CTX;
@@ -408,8 +401,10 @@ var
   {$ENDIF}
 Begin
   Result := false;
-  Decrypted := '';
-  cryptex := Psecure_t(@MessageToDecrypt[1]);
+  Decrypted := Nil;
+  if Length(MessageToDecrypt)=0 then Exit;
+
+  cryptex := Psecure_t(@MessageToDecrypt[Low(MessageToDecrypt)]);
   // Make sure we are generating enough key material for the symmetric ciphers.
   key_length := EVP_CIPHER_key_length(EVP_aes_256_cbc);
   if (key_length*2>SHA512_DIGEST_LENGTH) then begin
@@ -427,11 +422,7 @@ Begin
     // Use the intersection of the provided keys to generate the envelope data used by the ciphers below.
     // The ecies_key_derivation() function uses SHA 512 to ensure we have a sufficient amount of envelope key
     // material and that the material created is sufficiently secure.
-    {$IFDEF FPC}
-    FillByte(envelope_key,length(envelope_key),0);
-    {$ELSE}
-    FillMemory(@envelope_key,length(envelope_key),0);
-    {$ENDIF}
+    FillChar(envelope_key,length(envelope_key),0);
     if (ECDH_compute_key(@envelope_key,SHA512_DIGEST_LENGTH,EC_KEY_get0_public_key(ephemeral),
       PrivateKey, ecies_key_derivation_512)<>SHA512_DIGEST_LENGTH) then begin
       if logErrors then TLog.NewLog(lterror,'ECIES',Format('An error occurred while trying to compute the envelope key. {error = %s}',[ERR_error_string(ERR_get_error, nil)]));
@@ -476,13 +467,8 @@ Begin
   block := output;
   try
     // For now we use an empty initialization vector. We also clear out the result buffer just to be on the safe side.
-    {$IFDEF FPC}
-    FillByte(iv,EVP_MAX_IV_LENGTH,0);
-    FillByte(output^,output_length+1,0);
-    {$ELSE}
-    FillMemory(@iv,EVP_MAX_IV_LENGTH,0);
-    FillMemory(output,output_length+1,0);
-    {$ENDIF}
+    FillChar(iv,EVP_MAX_IV_LENGTH,0);
+    FillChar(output^,output_length+1,0);
     {$IFDEF OpenSSL10}
     EVP_CIPHER_CTX_init(@cipher);
     pcipher := @cipher;
@@ -508,7 +494,7 @@ Begin
         exit;
       end;
       SetLength(Decrypted,secure_orig_length(cryptex));
-      CopyMemory(@Decrypted[1],output,length(Decrypted));
+      Move(output^,Decrypted[Low(Decrypted)],length(Decrypted));
       Result := true;
     finally
       {$IFDEF OpenSSL10}

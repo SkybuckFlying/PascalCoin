@@ -23,14 +23,14 @@ interface
 
 uses
   {$IFnDEF FPC}
-    Windows, AppEvnts,
+    Windows, AppEvnts, System.Actions,
   {$ELSE}
     LCLIntf, LCLType, LMessages, FileUtil,
   {$ENDIF}
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
   Menus, ActnList, UAccounts, UBlockChain, UNode, UCrypto, UBaseTypes,
-  UFileStorage, UWallet, UConst, UTxMultiOperation, UOpTransaction, URPC, UJSONFunctions,
-  System.Actions;
+  UFileStorage, UWallet, UConst, UTxMultiOperation, UOpTransaction, URPC,
+  {$IFNDEF FPC}System.Generics.Collections{$ELSE}Generics.Collections{$ENDIF}, UJSONFunctions;
 
 
 type
@@ -132,7 +132,7 @@ Uses
 {$IFDEF TESTNET}
    UFRMRandomOperations,
 {$ENDIF}
-   UFRMRPCCalls;
+   UPCDataTypes, UFRMRPCCalls, UFRMMemoText;
 
 
 { TFRMOperationsExplorer }
@@ -170,7 +170,7 @@ begin
     if (op is TOpMultiOperation) then mop := TOpMultiOperation(op);
   end;
   If Not Assigned(mop) then begin
-    mop := TOpMultiOperation.Create;
+    mop := TOpMultiOperation.Create(FSourceNode.Bank.SafeBox.CurrentProtocol);
     FOperationsHashTree.AddOperationToHashTree(mop);
     mop.Free;
     mop := FOperationsHashTree.GetOperation(FOperationsHashTree.OperationsCount-1) as TOpMultiOperation;
@@ -279,7 +279,7 @@ begin
   If Not InputQuery(Caption,Format('Multioperation: Remove account sender/receiver/changer. Which account?',[]),aux) then Exit;
   nAccount := StrToIntDef(aux,-1);
   If nAccount<0 then Exit;
-  newMop := TOpMultiOperation.Create;
+  newMop := TOpMultiOperation.Create(FSourceNode.Bank.SafeBox.CurrentProtocol);
   Try
     SetLength(txs,0);
     SetLength(txr,0);
@@ -334,7 +334,7 @@ begin
     If (j>=0) then begin
       // Can sign
       If (Assigned(FSourceWalletKeys.Key[j].PrivateKey)) then begin
-        inc(n, mop.DoSignMultiOperationSigner(mop.Data.txSenders[i].Account,FSourceWalletKeys.Key[j].PrivateKey));
+        inc(n, mop.DoSignMultiOperationSigner(SourceNode.Bank.SafeBox.CurrentProtocol,mop.Data.txSenders[i].Account,FSourceWalletKeys.Key[j].PrivateKey));
       end;
     end;
   end;
@@ -343,7 +343,7 @@ begin
     If (j>=0) then begin
       // Can sign
       If (Assigned(FSourceWalletKeys.Key[j].PrivateKey)) then begin
-        inc(n, mop.DoSignMultiOperationSigner(mop.Data.changesInfo[i].Account,FSourceWalletKeys.Key[j].PrivateKey));
+        inc(n, mop.DoSignMultiOperationSigner(SourceNode.Bank.SafeBox.CurrentProtocol,mop.Data.changesInfo[i].Account,FSourceWalletKeys.Key[j].PrivateKey));
       end;
     end;
   end;
@@ -358,7 +358,7 @@ Var op : TPCOperation;
   aux : String;
   nAccount,n_operation : Cardinal;
   changes : TMultiOpChangesInfo;
-  new_name,errors : AnsiString;
+  new_name, errors : String;
   new_type : Word;
   new_account_key : TAccountKey;
 label LBL_start_changer;
@@ -369,7 +369,7 @@ begin
     if (op is TOpMultiOperation) then mop := TOpMultiOperation(op);
   end;
   If Not Assigned(mop) then begin
-    mop := TOpMultiOperation.Create;
+    mop := TOpMultiOperation.Create(FSourceNode.Bank.SafeBox.CurrentProtocol);
     FOperationsHashTree.AddOperationToHashTree(mop);
     mop.Free;
     mop := FOperationsHashTree.GetOperation(FOperationsHashTree.OperationsCount-1) as TOpMultiOperation;
@@ -392,7 +392,7 @@ LBL_start_changer:
     If Assigned(FSourceNode) then begin
       If (nAccount<FSourceNode.Bank.AccountsCount) then begin
         n_operation := FSourceNode.Bank.SafeBox.Account(nAccount).n_operation+1;
-        new_name:= FSourceNode.Bank.SafeBox.Account(nAccount).name;
+        new_name:= TEncoding.ANSI.GetString( FSourceNode.Bank.SafeBox.Account(nAccount).name );
         new_type:= FSourceNode.Bank.SafeBox.Account(nAccount).account_type;
         new_account_key := FSourceNode.Bank.SafeBox.Account(nAccount).accountInfo.accountKey;
       end;
@@ -409,7 +409,7 @@ LBL_start_changer:
       aux := new_name;
       If Not InputQuery(Caption,Format('New name for account %s:',[TAccountComp.AccountNumberToAccountTxtNumber(nAccount)]),aux) then Break;
       aux := LowerCase(aux);
-    Until (aux='') Or (TPCSafeBox.ValidAccountName(aux,errors));
+    Until (aux='') Or (TPCSafeBox.ValidAccountName(TEncoding.ANSI.GetBytes(aux),errors));
     new_name := aux;
 
     aux := IntToStr(new_type);
@@ -429,7 +429,7 @@ LBL_start_changer:
     changes[high(changes)] := CT_TMultiOpChangeInfo_NUL;
     changes[high(changes)].Account:=nAccount;
     changes[high(changes)].Changes_type:=[account_name,account_type];
-    changes[high(changes)].New_Name:=new_name;
+    changes[high(changes)].New_Name:=TEncoding.ANSI.GetBytes(new_name);
     changes[high(changes)].New_Type:=new_type;
     If new_account_key.EC_OpenSSL_NID<>CT_TECDSA_Public_Nul.EC_OpenSSL_NID then begin
       changes[high(changes)].Changes_type:=changes[high(changes)].Changes_type + [public_key];
@@ -495,7 +495,7 @@ end;
 
 procedure TFRMOperationsExplorer.ActExecuteOperationExecute(Sender: TObject);
 Var op : TPCOperation;
-  errors : AnsiString;
+  errors : String;
 begin
   If Not Assigned(FSourceNode) then Raise Exception.Create('No node to Execute');
   op := GetSelectedOperation;
@@ -530,24 +530,23 @@ end;
 procedure TFRMOperationsExplorer.MiImportOperationsFromTxtClick(Sender: TObject);
 Var i : Integer;
   raw : TRawBytes;
-  aux : AnsiString;
   auxS : String;
-  errors : AnsiString;
+  errors : String;
   opht : TOperationsHashTree;
   ms : TMemoryStream;
 begin
-  aux := '';
-  If Not InputQuery(Caption,'Paste a RAW hexadecimal operations:',auxS) then exit;
-  aux := auxS;
-  If Not TCrypto.IsHexString(aux) then Raise Exception.Create('Invalid hexadecimal RAW');
-  raw := TCrypto.HexaToRaw(aux);
+  auxS := '';
+  if Not InputMemoQuery('Paste a RAW hexadecimal operations:',False,auxS) then Exit;
+
+  if Not TCrypto.HexaToRaw(auxS, raw) then Raise Exception.Create('Invalid hexadecimal RAW');
+
   If Length(raw)=0 then Exit;
   ms := TMemoryStream.Create;
   opht := TOperationsHashTree.Create;
   Try
-    ms.Write(raw[1],Length(raw));
+    ms.Write(raw[0],Length(raw));
     ms.Position:=0;
-    If Not opht.LoadOperationsHashTreeFromStream(ms,false,0,Nil,errors) then Raise Exception.Create(errors);
+    If Not opht.LoadOperationsHashTreeFromStream(ms,false,TNode.Node.Bank.SafeBox.CurrentProtocol,TNode.Node.Bank.SafeBox.CurrentProtocol,Nil,errors) then Raise Exception.Create(errors);
     For i:=0 to opht.OperationsCount-1 do begin
       FOperationsHashTree.AddOperationToHashTree(opht.GetOperation(i));
     end;
@@ -604,11 +603,17 @@ begin
 end;
 
 procedure TFRMOperationsExplorer.SetSourceNode(AValue: TNode);
+var LLockedMempool : TPCOperationsComp;
 begin
   if FSourceNode=AValue then Exit;
   FSourceNode:=AValue;
   If Assigned(FSourceNode) then begin
-    FOperationsHashTree.CopyFromHashTree(FSourceNode.Operations.OperationsHashTree);
+    LLockedMempool := FSourceNode.LockMempoolRead;
+    try
+      FOperationsHashTree.CopyFromHashTree(LLockedMempool.OperationsHashTree);
+    finally
+      FSourceNode.UnlockMempoolRead;
+    end;
   end else FOperationsHashTree.ClearHastThree;
 end;
 
@@ -661,7 +666,7 @@ procedure TFRMOperationsExplorer.UpdateSelectedOperationInfo;
 Var op : TPCOperation;
   opht : TOperationsHashTree;
   i : Integer;
-  l : TList;
+  l : TList<Cardinal>;
   aux : String;
   raw : TRawBytes;
   ms : TMemoryStream;
@@ -678,8 +683,8 @@ begin
   If Assigned(op) then begin
     mOperationInfo.Lines.Add(Format('%s',[op.ToString]));
     mOperationInfo.Lines.Add('');
-    mOperationInfo.Lines.Add(Format('OpType:%d ClassName:%s',[op.OpType,op.ClassName]));
-    l := TList.Create;
+    mOperationInfo.Lines.Add(Format('OpType:%d ClassName:%s Protocol:%d',[op.OpType,op.ClassName,op.ProtocolVersion]));
+    l := TList<Cardinal>.Create;
     Try
       op.AffectedAccounts(l); aux := '';
       For i:=0 to l.Count-1 do begin
@@ -701,7 +706,7 @@ begin
       mOperationInfo.Lines.Add(Format('Size: %.2f Kb (%d bytes)',[ms.Size/1024,ms.Size]));
       ms.Position:=0;
       SetLength(raw,ms.Size);
-      ms.ReadBuffer(raw[1],ms.Size);
+      ms.ReadBuffer(raw[0],ms.Size);
       mOperationExport.Lines.Text := TCrypto.ToHexaString(raw);
     finally
       ms.Free;
@@ -733,7 +738,7 @@ begin
       if (opht.OperationsCount>0) then begin
         ms.Position:=0;
         SetLength(raw,ms.Size);
-        ms.ReadBuffer(raw[1],ms.Size);
+        ms.ReadBuffer(raw[0],ms.Size);
         mOperationExport.Lines.Text := TCrypto.ToHexaString(raw);
         jsonObj := TPCJSONObject.Create;
         Try

@@ -1,5 +1,6 @@
-{
-  Copyright (c) 2017 - 2018 Sphere 10 Software
+unit UCommon.Collections;
+
+{ Copyright (c) 2017 - 2018 Sphere 10 Software <https://www.sphere10.com>
 
   Common tools and extensions for Generics.Collections and collections in general usable
   across all tiers.
@@ -8,14 +9,15 @@
   or visit http://www.opensource.org/licenses/mit-license.php.
 
   Acknowledgements:
-    Herman Schoenfeld
+  - Herman Schoenfeld: main author
+
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
 }
 
-unit UCommon.Collections;
-
-{$mode delphi}
-
-{$modeswitch nestedprocvars}
+{$IFDEF FPC}
+  {$mode delphi}
+  {$modeswitch nestedprocvars}
+{$endif}
 
 interface
 
@@ -341,10 +343,12 @@ begin
 end;
 
 class function TComparerTool<T>.Many(const comparers: array of IComparer<T>) : IComparer<T>;
+(*
 type
   __TArrayTool_IComparer_T = TArrayTool<__IComparer_T>;
+*)
 begin
-  Result := TManyComparer<T>.Create( __TArrayTool_IComparer_T.Copy(comparers) );
+//  Result := TManyComparer<T>.Create( __TArrayTool_IComparer_T.Copy(comparers) ); // Skybuck: disabled for now
 end;
 
 class function TComparerTool<T>.Many(const comparers: TEnumerable<__IComparer_T>) : IComparer<T>;
@@ -361,8 +365,10 @@ begin
 end;
 
 class function TComparerTool<T>.AlwaysEqual : IComparer<T>;
+(*
 type
-  __TGlobalComparerFunc_T = TGlobalComparerFunc<T>;
+  __TGlobalComparerFunc_T = TGlobalComparerFunc<T>;  // Skybuck: Disabled for now
+*)
 begin
   Result :=  TComparerTool<T>.FromFunc( AlwaysEqualHandler );
 end;
@@ -463,8 +469,10 @@ begin
 end;
 
 class function TPredicateTool<T>.AndMany(const APredicates : array of IPredicate<T>) : IPredicate<T>;
+(*
 type
-  __TArrayTool_IPredicate_T = TArrayTool<__IPredicate_T>;
+  __TArrayTool_IPredicate_T = TArrayTool<__IPredicate_T>;  // Skybuck: Disabled for now
+*)
 var
   arr : TArray<__IPredicate_T>;
   i : Integer;
@@ -510,10 +518,14 @@ begin
 end;
 
 class function TPredicateTool<T>.OrMany(const APredicates : array of IPredicate<T>) : IPredicate<T>;
+// Skybuck: Disabled for now
+(*
 type
   __TArrayTool_IPredicate_T = TArrayTool<__IPredicate_T>;
+*)
 begin
-  Result := TOrManyPredicate<T>.Create( __TArrayTool_IPredicate_T.Copy( APredicates) );
+    // Skybuck: Disabled for now
+//  Result := TOrManyPredicate<T>.Create( __TArrayTool_IPredicate_T.Copy( APredicates) );
 end;
 
 class function TPredicateTool<T>.OrMany(const APredicates : array of TNestedPredicateFunc<T>) : IPredicate<T>;

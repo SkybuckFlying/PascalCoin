@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CONFIG>
   <ProjectOptions>
-    <Version Value="10"/>
+    <Version Value="11"/>
     <PathDelim Value="\"/>
     <General>
       <Flags>
@@ -11,8 +11,7 @@
       </Flags>
       <SessionStorage Value="InProjectDir"/>
       <MainUnit Value="0"/>
-      <Title Value="PascalCoinWalletLazarus"/>
-      <UseAppBundle Value="False"/>
+      <Title Value="PascalCoin Wallet"/>
       <ResourceType Value="res"/>
       <Icon Value="0"/>
     </General>
@@ -21,32 +20,33 @@
     </i18n>
     <VersionInfo>
       <UseVersionInfo Value="True"/>
-      <MajorVersionNr Value="2"/>
-      <MinorVersionNr Value="1"/>
-      <RevisionNr Value="6"/>
+      <MajorVersionNr Value="4"/>
+      <RevisionNr Value="3"/>
+      <BuildNr Value="1"/>
       <StringTable ProductVersion="0.0.0.0"/>
     </VersionInfo>
     <BuildModes Count="1">
-      <Item1 Name="Default" Default="True"/>
+      <Item1 Name="Debug" Default="True"/>
     </BuildModes>
     <PublishOptions>
       <Version Value="2"/>
     </PublishOptions>
     <RunParams>
-      <local>
-        <FormatVersion Value="1"/>
-      </local>
+      <FormatVersion Value="2"/>
+      <Modes Count="1">
+        <Mode0 Name="default"/>
+      </Modes>
     </RunParams>
     <RequiredPackages Count="1">
       <Item1>
         <PackageName Value="LCL"/>
       </Item1>
     </RequiredPackages>
-    <Units Count="33">
+    <Units Count="37">
       <Unit0>
         <Filename Value="pascalcoin_wallet_classic.dpr"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="PascalCoin_wallet_classic"/>
+        <UnitName Value="PascalCoin_Wallet_Classic"/>
       </Unit0>
       <Unit1>
         <Filename Value="core\UBlockChain.pas"/>
@@ -169,40 +169,59 @@
         <IsPartOfProject Value="True"/>
       </Unit24>
       <Unit25>
-        <Filename Value="core\UOpenSSLdef.pas"/>
+        <Filename Value="core\UFileStorage.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit25>
       <Unit26>
-        <Filename Value="core\UFileStorage.pas"/>
+        <Filename Value="core\UAES.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit26>
       <Unit27>
-        <Filename Value="core\UAES.pas"/>
+        <Filename Value="core\UChunk.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit27>
       <Unit28>
-        <Filename Value="core\UChunk.pas"/>
-        <IsPartOfProject Value="True"/>
-      </Unit28>
-      <Unit29>
         <Filename Value="gui-classic\UFRMAccountSelect.pas"/>
         <IsPartOfProject Value="True"/>
         <ComponentName Value="FRMAccountSelect"/>
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
+      </Unit28>
+      <Unit29>
+        <Filename Value="core\UBaseTypes.pas"/>
+        <IsPartOfProject Value="True"/>
       </Unit29>
       <Unit30>
-        <Filename Value="core\UBaseTypes.pas"/>
+        <Filename Value="config.inc"/>
         <IsPartOfProject Value="True"/>
       </Unit30>
       <Unit31>
-        <Filename Value="config.inc"/>
+        <Filename Value="core\UTxMultiOperation.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit31>
       <Unit32>
-        <Filename Value="core\UTxMultiOperation.pas"/>
+        <Filename Value="gui-classic\UGridUtils.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit32>
+      <Unit33>
+        <Filename Value="gui-classic\UGUIUtils.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit33>
+      <Unit34>
+        <Filename Value="core\URandomHash2.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit34>
+      <Unit35>
+        <Filename Value="core\URandomHash.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit35>
+      <Unit36>
+        <Filename Value="gui-classic\UFRMDiagnosticTool.pas"/>
+        <IsPartOfProject Value="True"/>
+        <ComponentName Value="FRMDiagnosticTool"/>
+        <HasResources Value="True"/>
+        <ResourceBaseClass Value="Form"/>
+      </Unit36>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
@@ -213,7 +232,7 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="core;gui-classic;libraries\synapse;libraries\pascalcoin"/>
+      <OtherUnitFiles Value="core;gui-classic;libraries\synapse;libraries\sphere10;libraries\cryptolib4pascal;libraries\simplebaselib4pascal;libraries\hashlib4pascal;libraries\generics.collections;libraries\pascalcoin;libraries\paszlib;libraries\gnugettext;libraries\abstractmem"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>
@@ -221,14 +240,9 @@
         <SyntaxMode Value="Delphi"/>
       </SyntaxOptions>
     </Parsing>
-    <CodeGeneration>
-      <Optimizations>
-        <OptimizationLevel Value="2"/>
-      </Optimizations>
-    </CodeGeneration>
     <Linking>
       <Debugging>
-        <GenerateDebugInfo Value="False"/>
+        <DebugInfoType Value="dsDwarf2Set"/>
       </Debugging>
       <Options>
         <Win32>

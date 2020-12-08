@@ -1,17 +1,17 @@
-{
-  Copyright (c) 2017 - 2018 Sphere 10 Software
+unit UCommon.Data;
 
-  Common data-oriented classes usable across all tiers.
+{ Copyright (c) 2017 - 2018 Sphere 10 Software <https://www.sphere10.com>
+
+  Common data tools.
 
   Distributed under the MIT software license, see the accompanying file LICENSE
   or visit http://www.opensource.org/licenses/mit-license.php.
 
   Acknowledgements:
-    Herman Schoenfeld
-    Maciej Izak (hnb)
-}
+  - Herman Schoenfeld: main author
 
-unit UCommon.Data;
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
 
 {$IFDEF FPC}
   {$MODE Delphi}
@@ -637,14 +637,18 @@ end;
 { TDataSourceTool }
 
 class function TDataSourceTool<T>.ConstructRowComparer(const AFilters : TArray<TColumnFilter>; const ADelegate : TApplySortDelegate<T>) : IComparer<T>;
+(*
 type
-  __IComparer_T = IComparer<T>;
+  __IComparer_T = IComparer<T>; // Skybuck: Disabled for now
+*)
 var
   i : integer;
-  comparers : TList<__IComparer_T>;
+//  comparers : TList<__IComparer_T>; // Skybuck: Disabled for now
   filter : TColumnFilter;
   GC : TDisposables;
 begin
+// Skybuck: Disabled for now
+(*
   comparers := GC.AddObject(  TList<__IComparer_T>.Create ) as TList<__IComparer_T>;
   for i := Low(AFilters) to High(AFilters) do begin
     filter := AFilters[i];
@@ -657,24 +661,33 @@ begin
     1: Result := comparers[0];
     else Result := TComparerTool<T>.Many(comparers);
   end;
+*)
 end;
 
 class function TDataSourceTool<T>.ConstructRowPredicate(const AFilters : TArray<TColumnFilter>; const ADelegate : TApplyFilterDelegate<T>; const AOperand : TFilterOperand) : IPredicate<T>;
+// Skybuck: Disabled for now
+(*
 type
   __TColumnFilterPredicate_T = TColumnFilterPredicate<T>;
   __TPredicateTool_T = TPredicateTool<T>;
+*)
 var
   i : integer;
   filters : __TList_IPredicate_T;
   GC : TDisposables;
 begin
+  // Skybuck: Disabled for now
+  (*
   filters := GC.AddObject( __TList_IPredicate_T.Create ) as __TList_IPredicate_T;
   for i := Low(AFilters) to High(AFilters) do begin
     if AFilters[i].Filter <> vgfSortable then begin
       filters.Add( __TColumnFilterPredicate_T.Create(AFilters[i], ADelegate));
     end;
   end;
+  *)
 
+  (*
+  // Skybuck: Free Pascal Compiler Bug/Internal Error 2015052501 (disabled for now).
   case filters.Count of
     0: Result := nil;
     1: Result := filters[0];
@@ -683,6 +696,7 @@ begin
       foOr: Result := __TPredicateTool_T.OrMany(filters.ToArray);
     end;
   end;
+  *)
 end;
 
 { TPageFetchParams }

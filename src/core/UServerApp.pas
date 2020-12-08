@@ -1,5 +1,18 @@
 unit UServerApp;
 
+{ Copyright (c) 2016 by PascalCoin Developers
+
+  Distributed under the MIT software license, see the accompanying file LICENSE
+  or visit http://www.opensource.org/licenses/mit-license.php.
+
+  This unit is a part of the PascalCoin Project, an infinitely scalable
+  cryptocurrency. Find us here:
+  Web: https://www.pascalcoin.org
+  Source: https://github.com/PascalCoin/PascalCoin
+
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
+
 {$IFDEF FPC}
   {$MODE Delphi}
 {$ENDIF}
@@ -268,7 +281,7 @@ begin
   // Check OpenSSL dll
   if Not LoadSSLCrypt then raise Exception.Create('Cannot load '+SSL_C_LIB+#10+'To use this software make sure this file is available on you system or reinstall the application');
   TCrypto.InitCrypto;
-  FWalletKeys.WalletFileName := TFolderHelper.GetPascalCoinDataFolder+PathDelim+'WalletKeys.dat';
+  FWalletKeys.WalletFileName := TNode.GetPascalCoinDataFolder+PathDelim+'WalletKeys.dat';
   // Creating Node:
   FNode := TNode.Node;
   // RPC Server
@@ -278,7 +291,7 @@ begin
   FRPC.Active:=true;
   // Check Database
   FNode.Bank.StorageClass := TFileStorage;
-  TFileStorage(FNode.Bank.Storage).DatabaseFolder := TFolderHelper.GetPascalCoinDataFolder+PathDelim+'Data';
+  TFileStorage(FNode.Bank.Storage).DatabaseFolder := TNode.GetPascalCoinDataFolder+PathDelim+'Data';
   // Reading database
   Log(sltInfo,'Reading database and constructing PascalCoin accounts');
   FNode.Node.Bank.DiskRestoreFromOperations(CT_MaxBlock);

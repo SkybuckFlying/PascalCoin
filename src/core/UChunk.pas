@@ -1,44 +1,161 @@
 unit UChunk;
 
-{$IFDEF FPC}
-  {$mode delphi}
-{$ENDIF}
-
 { Copyright (c) 2016 by Albert Molina
 
   Distributed under the MIT software license, see the accompanying file LICENSE
   or visit http://www.opensource.org/licenses/mit-license.php.
 
-  This unit is a part of Pascal Coin, a P2P crypto currency without need of
-  historical operations.
+  This unit is a part of the PascalCoin Project, an infinitely scalable
+  cryptocurrency. Find us here:
+  Web: https://www.pascalcoin.org
+  Source: https://github.com/PascalCoin/PascalCoin
 
-  If you like it, consider a donation using BitCoin:
+  If you like it, consider a donation using Bitcoin:
   16K3HCZRhFUtM8GdWRcfKeaa6KsuyxZaYk
 
-  }
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
+
+{$IFDEF FPC}
+  {$mode delphi}
+{$ENDIF}
 
 interface
 
 uses
-  Classes, SysUtils,  ZLib, {$IFDEF FPC} zStream, {$ENDIF}
-  UAccounts, ULog, UConst, UCrypto;
+  Classes, SysUtils,
+  {$IFDEF FPC}
+    // NOTE:
+    // Due to FreePascal 3.0.4 (and earlier) bug, will not use internal "paszlib" package, use modified instead
+    // Updated on PascalCoin v4.0.2
+    {$IFDEF VER3_2}
+      zStream, // <- Not used in current FreePascal v3.0.4 caused by a bug: https://bugs.freepascal.org/view.php?id=34422
+    {$ELSE}
+      paszlib_zStream,
+    {$ENDIF}
+  {$ELSE}
+  zlib,
+  {$ENDIF}
+  UAccounts, ULog, UConst, UCrypto, UBaseTypes, UPCDataTypes;
 
 type
+
+  EPCChunk = Class(Exception);
 
   { TPCChunk }
 
   TPCChunk = Class
   private
   public
-    class function SaveSafeBoxChunkFromSafeBox(SafeBoxStream, DestStream : TStream; fromBlock, toBlock : Cardinal; var errors : AnsiString) : Boolean;
-    class function LoadSafeBoxFromChunk(Chunk, DestStream : TStream; var safeBoxHeader : TPCSafeBoxHeader; var errors : AnsiString) : Boolean;
+    class function SaveSafeBoxChunkFromSafeBox(SafeBoxStream, DestStream : TStream; fromBlock, toBlock : Cardinal; var errors : String) : Boolean;
+    class function LoadSafeBoxFromChunk(Chunk, DestStream : TStream; var safeBoxHeader : TPCSafeBoxHeader; var errors : String) : Boolean;
+  end;
+
+  { TPCSafeboxChunks }
+
+  TPCSafeboxChunks = Class
+  private
+    FChunks : Array of TStream;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Clear;
+    function Count : Integer;
+    procedure AddChunk(ASafeboxStreamChunk : TStream);
+    function GetSafeboxChunk(index : Integer) : TStream;
+    function GetSafeboxChunkHeader(index : Integer) : TPCSafeBoxHeader;
+    function IsComplete : Boolean;
+    function GetSafeboxHeader : TPCSafeBoxHeader;
   end;
 
 implementation
 
+{ TPCSafeboxChunks }
+
+constructor TPCSafeboxChunks.Create;
+begin
+  SetLength(FChunks,0);
+end;
+
+destructor TPCSafeboxChunks.Destroy;
+begin
+  Clear;
+  inherited Destroy;
+end;
+
+procedure TPCSafeboxChunks.Clear;
+var i : Integer;
+begin
+  For i:=0 to Count-1 do begin
+    FChunks[i].Free;
+  end;
+  SetLength(FChunks,0);
+end;
+
+function TPCSafeboxChunks.Count: Integer;
+begin
+  Result := Length(FChunks);
+end;
+
+procedure TPCSafeboxChunks.AddChunk(ASafeboxStreamChunk: TStream);
+var LLastHeader, LsbHeader : TPCSafeBoxHeader;
+begin
+  If Not TPCSafeBox.LoadSafeBoxStreamHeader(ASafeboxStreamChunk,LsbHeader) then begin
+    Raise EPCChunk.Create('SafeBoxStream is not a valid SafeBox to add!');
+  end;
+  if (Count>0) then begin
+    LLastHeader := GetSafeboxChunkHeader(Count-1);
+    if (LsbHeader.ContainsFirstBlock)
+      or (LsbHeader.startBlock<>LLastHeader.endBlock+1)
+      or (LLastHeader.ContainsLastBlock)
+      or (LsbHeader.protocol<>LLastHeader.protocol)
+      or (LsbHeader.blocksCount<>LLastHeader.blocksCount)
+      or (Not LsbHeader.safeBoxHash.IsEqualTo( LLastHeader.safeBoxHash ))
+      then begin
+      raise EPCChunk.Create(Format('Cannot add %s at (%d) %s',[LsbHeader.ToString,Length(FChunks),LLastHeader.ToString]));
+    end;
+  end else if (Not LsbHeader.ContainsFirstBlock) then begin
+    raise EPCChunk.Create(Format('Cannot add %s',[LsbHeader.ToString]));
+  end;
+  //
+  SetLength(FChunks,Length(FChunks)+1);
+  FChunks[High(FChunks)] := ASafeboxStreamChunk;
+end;
+
+function TPCSafeboxChunks.GetSafeboxChunk(index: Integer): TStream;
+begin
+  if (index<0) or (index>=Count) then raise EPCChunk.Create(Format('Invalid index %d of %d',[index,Length(FChunks)]));
+  Result := FChunks[index];
+  Result.Position := 0;
+end;
+
+function TPCSafeboxChunks.GetSafeboxChunkHeader(index: Integer): TPCSafeBoxHeader;
+begin
+  If Not TPCSafeBox.LoadSafeBoxStreamHeader(GetSafeboxChunk(index),Result) then begin
+    Raise EPCChunk.Create(Format('Cannot capture header index %d of %d',[index,Length(FChunks)]));
+  end;
+end;
+
+function TPCSafeboxChunks.IsComplete: Boolean;
+var LsbHeader : TPCSafeBoxHeader;
+begin
+  if Count=0 then Result := False
+  else begin
+    LsbHeader := GetSafeboxChunkHeader(Count-1);
+    Result := LsbHeader.ContainsLastBlock;
+  end;
+end;
+
+function TPCSafeboxChunks.GetSafeboxHeader: TPCSafeBoxHeader;
+begin
+  if Not IsComplete then Raise EPCChunk.Create(Format('Chunks are not complete %d',[Length(FChunks)]));
+  Result := GetSafeboxChunkHeader(Count-1);
+  Result.startBlock := 0;
+end;
+
 { TPCChunk }
 
-class function TPCChunk.SaveSafeBoxChunkFromSafeBox(SafeBoxStream, DestStream : TStream; fromBlock, toBlock: Cardinal; var errors : AnsiString) : Boolean;
+class function TPCChunk.SaveSafeBoxChunkFromSafeBox(SafeBoxStream, DestStream : TStream; fromBlock, toBlock: Cardinal; var errors : String) : Boolean;
 Var
   c: Cardinal;
   cs : Tcompressionstream;
@@ -69,7 +186,7 @@ begin
     TLog.NewLog(ltDebug,ClassName,Format('Saving safebox chunk from %d to %d (current blockscount: %d)',[FromBlock,ToBlock,sbHeader.blocksCount]));
 
     // Header:
-    TStreamOp.WriteAnsiString(DestStream,CT_SafeBoxChunkIdentificator);
+    TStreamOp.WriteAnsiString(DestStream,TEncoding.ASCII.GetBytes(CT_SafeBoxChunkIdentificator));
     DestStream.Write(CT_SafeBoxBankVersion,SizeOf(CT_SafeBoxBankVersion));
     //
     auxStream := TMemoryStream.Create;
@@ -86,7 +203,10 @@ begin
       DestStream.Write(c,SizeOf(c)); // Save 4 random bytes, latter will be changed
       //
       // Zip it and add to Stream
-      cs := Tcompressionstream.create(cldefault,DestStream);
+      cs := Tcompressionstream.create(clFastest,DestStream);
+        // Note: Previously was using clDefault, but found a bug for FreePascal 3.0.4
+        // https://bugs.freepascal.org/view.php?id=34422
+        // On 2018-10-15 changed clDefault to clFastest
       try
         cs.CopyFrom(auxStream,auxStream.Size); // compressing
       finally
@@ -107,8 +227,8 @@ begin
   end;
 end;
 
-class function TPCChunk.LoadSafeBoxFromChunk(Chunk, DestStream: TStream; var safeBoxHeader : TPCSafeBoxHeader; var errors: AnsiString): Boolean;
-var s : AnsiString;
+class function TPCChunk.LoadSafeBoxFromChunk(Chunk, DestStream: TStream; var safeBoxHeader : TPCSafeBoxHeader; var errors: String): Boolean;
+var raw : TRawBytes;
   w : Word;
   cUncompressed, cCompressed : Cardinal;
   ds : Tdecompressionstream;
@@ -120,8 +240,8 @@ begin
   safeBoxHeader := CT_PCSafeBoxHeader_NUL;
   // Header:
   errors := 'Invalid stream header';
-  TStreamOp.ReadAnsiString(Chunk,s);
-  If (s<>CT_SafeBoxChunkIdentificator) then begin
+  TStreamOp.ReadAnsiString(Chunk,raw);
+  If (Not TBaseType.Equals(raw,TEncoding.ASCII.GetBytes(CT_SafeBoxChunkIdentificator))) then begin
     exit;
   end;
   Chunk.Read(w,sizeof(w));

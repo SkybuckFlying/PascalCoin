@@ -1,21 +1,24 @@
 unit UFRMNewPrivateKeyType;
 
-{$IFDEF FPC}
-  {$MODE Delphi}
-{$ENDIF}
-
 { Copyright (c) 2016 by Albert Molina
 
   Distributed under the MIT software license, see the accompanying file LICENSE
   or visit http://www.opensource.org/licenses/mit-license.php.
 
-  This unit is a part of Pascal Coin, a P2P crypto currency without need of
-  historical operations.
+  This unit is a part of the PascalCoin Project, an infinitely scalable
+  cryptocurrency. Find us here:
+  Web: https://www.pascalcoin.org
+  Source: https://github.com/PascalCoin/PascalCoin
 
-  If you like it, consider a donation using BitCoin:
+  If you like it, consider a donation using Bitcoin:
   16K3HCZRhFUtM8GdWRcfKeaa6KsuyxZaYk
 
-  }
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
+
+{$IFDEF FPC}
+  {$MODE Delphi}
+{$ENDIF}
 
 interface
 
@@ -26,7 +29,8 @@ uses
   LCLIntf, LCLType, LMessages,
 {$ENDIF}
   Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs, StdCtrls, Buttons, ExtCtrls, UWallet,UCrypto;
+  Dialogs, StdCtrls, Buttons, ExtCtrls, UWallet, UCrypto,
+  {$IFNDEF FPC}System.Generics.Collections{$ELSE}Generics.Collections{$ENDIF};
 
 type
   TFRMNewPrivateKeyType = class(TForm)
@@ -53,7 +57,7 @@ type
 implementation
 
 uses
-  UAccounts, UConst ;
+  {$IFDEF USE_GNUGETTEXT}gnugettext,{$ENDIF}UAccounts, UConst;
 
 {$IFnDEF FPC}
   {$R *.dfm}
@@ -75,18 +79,20 @@ begin
 end;
 
 procedure TFRMNewPrivateKeyType.FormCreate(Sender: TObject);
-Var l : TList;
+Var l : TList<Word>;
   i : Integer;
 begin
+  {$IFDEF USE_GNUGETTEXT}TranslateComponent(self);{$ENDIF}
+  //
   FGeneratedPrivateKey := Nil;
   FWalletKeys := Nil;
   ebName.Text := DateTimeToStr(now);
   rgKeyType.Items.Clear;
-  l := TList.Create;
+  l := TList<Word>.Create;
   Try
     TAccountComp.ValidsEC_OpenSSL_NID(l);
     for i := 0 to l.Count - 1 do begin
-      rgKeyType.Items.AddObject(TAccountComp.GetECInfoTxt(PtrInt(l[i])),l[i]);
+      rgKeyType.Items.AddObject(TAccountComp.GetECInfoTxt(l[i]),TObject(l[i]));
     end;
   Finally
     l.free;

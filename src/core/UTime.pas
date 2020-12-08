@@ -1,36 +1,34 @@
 unit UTime;
 
-{$IFDEF FPC}
-  {$MODE Delphi}
-{$ENDIF}
-
 { Copyright (c) 2016 by Albert Molina
 
   Distributed under the MIT software license, see the accompanying file LICENSE
   or visit http://www.opensource.org/licenses/mit-license.php.
 
-  This unit is a part of Pascal Coin, a P2P crypto currency without need of
-  historical operations.
+  This unit is a part of the PascalCoin Project, an infinitely scalable
+  cryptocurrency. Find us here:
+  Web: https://www.pascalcoin.org
+  Source: https://github.com/PascalCoin/PascalCoin
 
-  If you like it, consider a donation using BitCoin:
+  If you like it, consider a donation using Bitcoin:
   16K3HCZRhFUtM8GdWRcfKeaa6KsuyxZaYk
 
-  }
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
+
+{$IFDEF FPC}
+  {$MODE Delphi}
+{$ENDIF}
 
 interface
 
 Uses
 {$IFnDEF FPC}
-  Windows,
+  System.DateUtils,
 {$ELSE}
   {LCLIntf, LCLType, LMessages,}
 {$ENDIF}
   SysUtils;
-
-{$IFnDEF FPC}
-function TzSpecificLocalTimeToSystemTime(lpTimeZoneInformation: PTimeZoneInformation; var lpLocalTime, lpUniversalTime: TSystemTime): BOOL; stdcall;
-function SystemTimeToTzSpecificLocalTime(lpTimeZoneInformation: PTimeZoneInformation; var lpUniversalTime,lpLocalTime: TSystemTime): BOOL; stdcall;
-{$ENDIF}
 
 Function DateTime2UnivDateTime(d:TDateTime):TDateTime;
 Function UnivDateTime2LocalDateTime(d:TDateTime):TDateTime;
@@ -38,24 +36,21 @@ Function UnivDateTime2LocalDateTime(d:TDateTime):TDateTime;
 function UnivDateTimeToUnix(dtDate: TDateTime): Longint;
 function UnixToUnivDateTime(USec: Longint): TDateTime;
 
-function UnixTimeToLocalElapsedTime(USec : Longint) : AnsiString;
-Function DateTimeElapsedTime(dtDate : TDateTime) : AnsiString;
+function UnixTimeToLocalElapsedTime(USec : Longint) : String;
+Function DateTimeElapsedTime(dtDate : TDateTime) : String;
 
-Function UnixTimeToLocalStr(UnixTime : Longint) : AnsiString;
+Function UnixTimeToLocalStr(UnixTime : Longint) : String;
 
 implementation
 
 {$IFDEF FPC}
 Uses DateUtils;
-{$ELSE}
-function TzSpecificLocalTimeToSystemTime; external 'kernel32.dll' name 'TzSpecificLocalTimeToSystemTime';
-function SystemTimeToTzSpecificLocalTime; external kernel32 name 'SystemTimeToTzSpecificLocalTime';
 {$ENDIF}
 
 const
     UnixStartDate: TDateTime = 25569.0; // 01/01/1970
 
-function UnixTimeToLocalElapsedTime(USec : Longint) : AnsiString;
+function UnixTimeToLocalElapsedTime(USec : Longint) : String;
 Var diff, positivediff : Longint;
 Begin
   diff := UnivDateTimeToUnix(DateTime2UnivDateTime(now)) - Usec;
@@ -69,7 +64,7 @@ Begin
   else Result := inttostr(diff DIV (60*60*24))+' days ago';
 End;
 
-Function DateTimeElapsedTime(dtDate : TDateTime) : AnsiString;
+Function DateTimeElapsedTime(dtDate : TDateTime) : String;
 Begin
   Result := UnixTimeToLocalElapsedTime( UnivDateTimeToUnix(DateTime2UnivDateTime(dtDate)) );
 End;
@@ -80,14 +75,8 @@ begin
   Result := LocalTimeToUniversal(d,-GetLocalTimeOffset);
 end;
 {$ELSE}
-var
- TZI:TTimeZoneInformation;
- LocalTime, UniversalTime:TSystemTime;
 begin
-  GetTimeZoneInformation(tzi);
-  DateTimeToSystemTime(d,LocalTime);
-  TzSpecificLocalTimeToSystemTime(@tzi,LocalTime,UniversalTime);
-  Result := SystemTimeToDateTime(UniversalTime);
+  Result := TTimeZone.Local.ToUniversalTime(d);
 end;
 {$ENDIF}
 
@@ -96,16 +85,9 @@ Function UnivDateTime2LocalDateTime(d:TDateTime):TDateTime;
 begin
   Result := UniversalTimeToLocal(d,-GetLocalTimeOffset);
 end;
-
 {$ELSE}
-var
- TZI:TTimeZoneInformation;
- LocalTime, UniversalTime:TSystemTime;
 begin
-  GetTimeZoneInformation(tzi);
-  DateTimeToSystemTime(d,UniversalTime);
-  SystemTimeToTzSpecificLocalTime(@tzi,UniversalTime,LocalTime);
-  Result := SystemTimeToDateTime(LocalTime);
+  Result := TTimeZone.Local.ToLocalTime(d);
 end;
 {$ENDIF}
 
@@ -119,7 +101,7 @@ begin
   Result := (Usec / 86400) + UnixStartDate;
 end;
 
-Function UnixTimeToLocalStr(UnixTime : Longint) : AnsiString;
+Function UnixTimeToLocalStr(UnixTime : Longint) : String;
 begin
   Result := DateTimeToStr(UnivDateTime2LocalDateTime(UnixToUnivDateTime(UnixTime)))
 end;

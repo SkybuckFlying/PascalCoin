@@ -1,21 +1,24 @@
 unit UFRMAccountSelect;
 
-{$IFDEF FPC}
-  {$MODE Delphi}
-{$ENDIF}
-
 { Copyright (c) 2016 by Albert Molina
 
   Distributed under the MIT software license, see the accompanying file LICENSE
   or visit http://www.opensource.org/licenses/mit-license.php.
 
-  This unit is a part of Pascal Coin, a P2P crypto currency without need of
-  historical operations.
+  This unit is a part of the PascalCoin Project, an infinitely scalable
+  cryptocurrency. Find us here:
+  Web: https://www.pascalcoin.org
+  Source: https://github.com/PascalCoin/PascalCoin
 
-  If you like it, consider a donation using BitCoin:
+  If you like it, consider a donation using Bitcoin:
   16K3HCZRhFUtM8GdWRcfKeaa6KsuyxZaYk
 
-  }
+  THIS LICENSE HEADER MUST NOT BE REMOVED.
+}
+
+{$IFDEF FPC}
+  {$MODE Delphi}
+{$ENDIF}
 
 interface
 
@@ -25,9 +28,10 @@ uses
 {$ELSE}
   LCLIntf, LCLType, LMessages,
 {$ENDIF}
+  UPCDataTypes,
   Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
   Dialogs, UAccounts, Grids, StdCtrls, Buttons, ExtCtrls, UWallet, UNode,
-  UGridUtils, UConst, UThread;
+  UGridUtils, UConst, UThread, UPCOrderedLists, UBaseTypes;
 
 const
   CT_AS_MyAccounts = $0001;
@@ -39,11 +43,11 @@ type
     SafeBox : TPCSafeBox;
     inWalletKeys : TWalletKeys;
     inAccountKey : TAccountKey;
-    onlyForSale,
+    onlyForSaleOrSwap,
     onlyForPublicSale,
     onlyForPrivateSaleToMe : Boolean;
     minBal,maxBal : Int64;
-    searchName : AnsiString;
+    searchName : TRawBytes;
   end;
 
   TSearchProcedure = procedure(Const searchFound : TCardinalsArray; const searchValues : TSearchValues) of object;
@@ -155,37 +159,46 @@ procedure TSearchThread.BCExecute;
     account : TAccount;
     isValid : Boolean;
     validAccKey : Boolean;
-    errors : AnsiString;
+    errors : String;
     i : Integer;
+    LBlocksCount : Integer;
+    LCurrentProtocol : Word;
   begin
     SetLength(FAccounts,0);
     c := 0;
     maxC := FSearchValues.SafeBox.AccountsCount-1;
-    validAccKey := TAccountComp.IsValidAccountKey(FSearchValues.inAccountKey,errors);
+    validAccKey := TAccountComp.IsValidAccountKey(FSearchValues.inAccountKey,CT_BUILD_PROTOCOL,errors);
+    LBlocksCount := FSearchValues.SafeBox.BlocksCount;
+    LCurrentProtocol := FSearchValues.SafeBox.CurrentProtocol;
     while (c<=maxC) And (Not Terminated) And (Not FDoStopSearch) do begin
       account := FSearchValues.SafeBox.Account(c);
       isValid := True;
       If validAccKey then begin
         isValid := TAccountComp.EqualAccountKeys(account.accountInfo.accountKey,FSearchValues.inAccountKey);
       end else if (Assigned(FSearchValues.inWalletKeys)) then begin
-        isValid := FSearchValues.inWalletKeys.IndexOfAccountKey(account.accountInfo.accountKey)>=0;
+        isValid := (FSearchValues.inWalletKeys.IndexOfAccountKey(account.accountInfo.accountKey)>=0) or (FSearchValues.onlyForPrivateSaleToMe);
       end;
-      If isValid And (FSearchValues.onlyForSale) then begin
-        isValid := TAccountComp.IsAccountForSale(account.accountInfo);
+      If isValid And (FSearchValues.onlyForSaleOrSwap) then begin
+        isValid := TAccountComp.IsAccountForSaleOrSwap(account.accountInfo);
       end;
       If IsValid and (FSearchValues.onlyForPublicSale) then begin
-        isValid := (TAccountComp.IsAccountForSale(account.accountInfo)) And (Not TAccountComp.IsAccountForSaleAcceptingTransactions(account.accountInfo));
+        isValid := TAccountComp.IsAccountForPublicSale(account.accountInfo);
       end;
       If IsValid and (FSearchValues.onlyForPrivateSaleToMe) then begin
-        isValid := (TAccountComp.IsAccountForSaleAcceptingTransactions(account.accountInfo)) And
-          (Assigned(FSearchValues.inWalletKeys)) And (FSearchValues.inWalletKeys.IndexOfAccountKey(account.accountInfo.new_publicKey)>=0);
+        isValid := (
+          (TAccountComp.IsAccountForPrivateSale(account.accountInfo) OR (TAccountComp.IsAccountForAccountSwap(account.accountInfo)))
+          and
+          (Assigned(FSearchValues.inWalletKeys))
+          and
+          (FSearchValues.inWalletKeys.IndexOfAccountKey(account.accountInfo.new_publicKey)>=0)
+          );
       end;
       If IsValid then begin
         IsValid := (account.balance>=FSearchValues.minBal) And ((FSearchValues.maxBal<0) Or (account.balance<=FSearchValues.maxBal));
       end;
-      If IsValid And (FSearchValues.searchName<>'') then begin
-        i := ansipos(FSearchValues.searchName,account.name);
-        IsValid := i>0;
+      If IsValid And (Length(FSearchValues.searchName)>0) then begin
+        i := TBaseType.FindIn(FSearchValues.searchName,account.name);
+        IsValid := i>=0;
       end;
       //
       if IsValid then begin
@@ -260,6 +273,7 @@ begin
 end;
 
 procedure TFRMAccountSelect.FormCreate(Sender: TObject);
+var LColumns : TAccountColumnArray;
 begin
   FSearchThread := TSearchThread.Create(false);
   FSearchThread.OnSearchFinished := OnSearchFinished;
@@ -272,6 +286,23 @@ begin
   FAccountsGrid := TAccountsGrid.Create(Self);
   FAccountsGrid.DrawGrid := dgAccounts;
   FAccountsGrid.OnUpdated:=OnAccountsGridUpdated;
+  FAccountsGrid.AllowMultiSelect := False;
+
+  SetLength(LColumns,6);
+  LColumns[0].ColumnType := act_account_number;
+  LColumns[0].width := 75;
+  LColumns[1].ColumnType := act_name;
+  LColumns[1].width := 80;
+  LColumns[2].ColumnType := act_balance;
+  LColumns[2].width := 80;
+  LColumns[3].ColumnType := act_n_operation;
+  LColumns[3].width := 40;
+  LColumns[4].ColumnType := act_type;
+  LColumns[4].width := 40;
+  LColumns[5].ColumnType := act_saleprice;
+  LColumns[5].width := 45;
+
+  FAccountsGrid.SetColumns( LColumns );
   //
   cbMyAccounts.OnClick:=cbMyAccountsClick;
   cbMyPrivateKeys.OnClick:=cbMyAccountsClick;
@@ -469,7 +500,7 @@ begin
   end else begin
     cbMyPrivateKeys.Font.Color := clGray;
   end;
-  searchValues.onlyForSale := (cbOnlyForSale.Checked);
+  searchValues.onlyForSaleOrSwap := (cbOnlyForSale.Checked);
   searchValues.onlyForPrivateSaleToMe := (cbOnlyForPrivateSaleToMe.Checked);
   If searchValues.onlyForPrivateSaleToMe then begin
     searchValues.inWalletKeys := FWalletKeys;
@@ -494,20 +525,20 @@ begin
     ebMaxBalance.Font.Color:=clGray;
   end;
   if (cbAccountsName.Checked) then begin
-    searchValues.searchName := LowerCase(Trim(ebAccountName.Text));
+    searchValues.searchName.FromString(ebAccountName.Text);
     ebAccountName.ParentFont:=True;
   end else begin
-    searchValues.searchName:='';
+    searchValues.searchName:=Nil;
     ebAccountName.Font.Color := clGray;
   end;
   If (searchValues.inAccountKey.EC_OpenSSL_NID=0) AND (searchValues.inWalletKeys=Nil) And (searchValues.maxBal<0) And (searchValues.minBal<=0) And
-     (Not searchValues.onlyForPrivateSaleToMe) And (Not searchValues.onlyForPublicSale) And (Not searchValues.onlyForSale) And
-     (searchValues.searchName='') then begin
-    FAccountsGrid.ShowAllAccounts:=True;
+     (Not searchValues.onlyForPrivateSaleToMe) And (Not searchValues.onlyForPublicSale) And (Not searchValues.onlyForSaleOrSwap) And
+     (Length(searchValues.searchName)=0) then begin
+    FAccountsGrid.AccountsGridDatasource := acds_Node;
     lblAccountsCount.Caption := IntToStr(FAccountsGrid.Node.Bank.SafeBox.AccountsCount);
     lblAccountsBalance.Caption := TAccountComp.FormatMoney(FAccountsGrid.AccountsBalance);
   end else begin
-    FAccountsGrid.ShowAllAccounts:=False;
+    FAccountsGrid.AccountsGridDatasource := acds_InternalList;
     FSearchThread.DoSearch(searchValues);
   end;
 end;
